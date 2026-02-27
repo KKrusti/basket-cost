@@ -4,6 +4,12 @@ Guidelines for AI coding agents working on the `basket-cost` project.
 
 ---
 
+## Communication
+
+Always communicate with the user in **Spanish**, regardless of the language used in code, comments, or commit messages.
+
+---
+
 ## Project Overview
 
 Two-tier SPA for tracking grocery prices in the Spanish market.
