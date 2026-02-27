@@ -350,52 +350,134 @@ body {
 }
 
 /* ─── Product Browser ────────────────────────────────────── */
-.product-browser__intro {
+
+/* Toolbar: label + controls side by side */
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.browser-toolbar__label {
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  margin-bottom: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.07em;
 }
 
-/*
- * Flow layout en columnas. Los encabezados de categoría usan
- * column-span: all para forzar una ruptura horizontal y quedar
- * alineados, sin dejar huecos entre productos.
- */
-.browser-flow {
-  columns: 3 130px;
-  column-gap: 0.625rem;
+.browser-toolbar__count {
+  font-weight: 400;
+  color: var(--color-text-subtle);
 }
 
-.browser-category-label {
-  column-span: all;
-  font-family: 'Rubik', sans-serif;
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 0.25rem 0.5rem;
-  margin-top: 0.5rem;
+.browser-toolbar__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Page-size selector */
+.browser-pagesize {
+  display: flex;
+  gap: 2px;
   background: var(--color-bg-alt);
+  border: 1.5px solid var(--color-border);
   border-radius: var(--radius-sm);
-  border-left: 3px solid var(--color-primary);
-  display: block;
-  line-height: 1.4;
+  padding: 2px;
 }
 
-.browser-category-label:first-child {
-  margin-top: 0;
+.browser-pagesize__btn {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  line-height: 1.5;
+  min-width: 32px;
 }
 
-.browser-product-btn {
+.browser-pagesize__btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.browser-pagesize__btn--active {
+  background: var(--color-surface);
+  color: var(--color-primary-dark);
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Layout toggle (3 / 4 columns) */
+.browser-layout-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--color-bg-alt);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+
+.browser-layout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.browser-layout-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.browser-layout-btn--active {
+  background: var(--color-surface);
+  color: var(--color-primary-dark);
+  box-shadow: var(--shadow-sm);
+}
+
+.browser-layout-btn:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Grid — CSS custom property drives column count */
+.browser-grid {
+  display: grid;
+  gap: 0.625rem;
+}
+
+.browser-grid--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.browser-grid--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Product card inside the grid */
+.browser-product-card {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.375rem;
-  padding: 0.5rem 0.375rem;
+  padding: 0.75rem 0.5rem 0.625rem;
   background: var(--color-surface);
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -404,29 +486,86 @@ body {
   text-align: center;
   min-height: 44px;
   box-shadow: var(--shadow-sm);
-  break-inside: avoid;
   width: 100%;
-  margin-bottom: 0.4rem;
 }
 
-.browser-product-btn:hover {
+.browser-product-card:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--color-primary-light);
   background: var(--color-surface-hover);
 }
 
-.browser-product-btn:focus-visible {
+.browser-product-card:focus-visible {
   outline: 3px solid var(--color-primary);
   outline-offset: 2px;
 }
 
-.browser-product-name {
-  font-size: 0.75rem;
+.browser-product-card__name {
+  font-size: 0.72rem;
   color: var(--color-text);
   font-weight: 500;
   line-height: 1.3;
   word-break: break-word;
   hyphens: auto;
+}
+
+.browser-product-card__price {
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-price);
+  line-height: 1;
+}
+
+/* Pagination */
+.browser-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1.5px solid var(--color-border);
+}
+
+.browser-pagination__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  box-shadow: var(--shadow-sm);
+}
+
+.browser-pagination__btn:hover:not(:disabled) {
+  border-color: var(--color-primary-light);
+  color: var(--color-primary-dark);
+  box-shadow: var(--shadow-md);
+}
+
+.browser-pagination__btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.browser-pagination__btn:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.browser-pagination__info {
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  min-width: 3rem;
+  text-align: center;
 }
 
 /* ─── Product Detail ─────────────────────────────────────── */
@@ -618,8 +757,10 @@ body {
     border-radius: var(--radius-lg);
   }
 
-  .browser-flow {
-    columns: 2 110px;
+  /* En móvil, 3 y 4 columnas se reducen a 2 */
+  .browser-grid--3,
+  .browser-grid--4 {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .detail-header {
