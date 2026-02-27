@@ -81,70 +81,74 @@ export default function SearchBar({ onSelectProduct }: SearchBarProps) {
     price.toFixed(2).replace('.', ',') + ' \u20AC';
 
   return (
-    <div>
-      <div className="search-container">
-        <SearchIcon />
-        <input
-          type="text"
-          className="search-input"
-          placeholder="Search product... (e.g. leche, aceite, pan)"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          autoFocus
-          aria-label="Buscar producto"
-        />
+    <div className="search-wrapper">
+      <div className="search-fixed">
+        <div className="search-container">
+          <SearchIcon />
+          <input
+            type="text"
+            className="search-input"
+            placeholder="Search product... (e.g. leche, aceite, pan)"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            autoFocus
+            aria-label="Buscar producto"
+          />
+        </div>
       </div>
 
-      {loading && (
-        <div>
-          <div className="loading">Searching...</div>
-          <div className="product-list" aria-hidden="true">
-            {[1, 2, 3].map((n) => (
-              <div key={n} className="skeleton skeleton-card" />
+      <div className="search-results">
+        {loading && (
+          <div>
+            <div className="loading">Searching...</div>
+            <div className="product-list" aria-hidden="true">
+              {[1, 2, 3].map((n) => (
+                <div key={n} className="skeleton skeleton-card" />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!loading && searched && results.length === 0 && (
+          <div className="empty-state">
+            <EmptyResultsIcon />
+            <p>No products found for &quot;{query}&quot;</p>
+            <p className="empty-state__hint">Prueba con otro término de búsqueda</p>
+          </div>
+        )}
+
+        {!loading && results.length > 0 && (
+          <div className="product-list" role="list">
+            {results.map((product) => (
+              <button
+                key={product.id}
+                className="product-card"
+                onClick={() => onSelectProduct(product.id)}
+                role="listitem"
+                aria-label={`${product.name} — ${formatPrice(product.currentPrice)}`}
+              >
+                <ProductImage productId={product.id} category={product.category} size="md" />
+                <div className="product-card-info">
+                  <h3>{product.name}</h3>
+                  {product.category && (
+                    <span className="category">{product.category}</span>
+                  )}
+                </div>
+                <div className="product-card-price">
+                  <div className="current">{formatPrice(product.currentPrice)}</div>
+                  <div className="range">
+                    {formatPrice(product.minPrice)} – {formatPrice(product.maxPrice)}
+                  </div>
+                </div>
+              </button>
             ))}
           </div>
-        </div>
-      )}
+        )}
 
-      {!loading && searched && results.length === 0 && (
-        <div className="empty-state">
-          <EmptyResultsIcon />
-          <p>No products found for &quot;{query}&quot;</p>
-          <p className="empty-state__hint">Prueba con otro término de búsqueda</p>
-        </div>
-      )}
-
-      {!loading && results.length > 0 && (
-        <div className="product-list" role="list">
-          {results.map((product) => (
-            <button
-              key={product.id}
-              className="product-card"
-              onClick={() => onSelectProduct(product.id)}
-              role="listitem"
-              aria-label={`${product.name} — ${formatPrice(product.currentPrice)}`}
-            >
-              <ProductImage productId={product.id} category={product.category} size="md" />
-              <div className="product-card-info">
-                <h3>{product.name}</h3>
-                {product.category && (
-                  <span className="category">{product.category}</span>
-                )}
-              </div>
-              <div className="product-card-price">
-                <div className="current">{formatPrice(product.currentPrice)}</div>
-                <div className="range">
-                  {formatPrice(product.minPrice)} – {formatPrice(product.maxPrice)}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {!loading && !searched && (
-        <ProductBrowser onSelectProduct={onSelectProduct} />
-      )}
+        {!loading && !searched && (
+          <ProductBrowser onSelectProduct={onSelectProduct} />
+        )}
+      </div>
     </div>
   );
 }

@@ -36,14 +36,16 @@ export default function App() {
         </p>
       </header>
 
-      {selectedProductId ? (
-        <ProductDetail
-          productId={selectedProductId}
-          onBack={() => setSelectedProductId(null)}
-        />
-      ) : (
-        <SearchBar onSelectProduct={setSelectedProductId} />
-      )}
+      <div className="app-content">
+        {selectedProductId ? (
+          <ProductDetail
+            productId={selectedProductId}
+            onBack={() => setSelectedProductId(null)}
+          />
+        ) : (
+          <SearchBar onSelectProduct={setSelectedProductId} />
+        )}
+      </div>
     </div>
   );
 }
