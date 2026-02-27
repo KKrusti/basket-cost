@@ -316,41 +316,32 @@ body {
 .product-browser__intro {
   font-size: 0.875rem;
   color: var(--color-text-muted);
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
-/*
- * Flow layout en columnas. Los encabezados de categoría usan
- * column-span: all para forzar una ruptura horizontal y quedar
- * alineados, sin dejar huecos entre productos.
- */
-.browser-flow {
-  columns: 3 140px;
-  column-gap: 0.75rem;
+.browser-category {
+  margin-bottom: 1.75rem;
 }
 
-.browser-category-label {
-  column-span: all;
+.browser-category-title {
   font-family: 'Rubik', sans-serif;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  padding: 0.3rem 0.6rem;
-  margin-top: 0.5rem;
-  background: var(--color-bg-alt);
-  border-radius: var(--radius-sm);
-  border-left: 3px solid var(--color-primary);
-  display: block;
-  line-height: 1.4;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1.5px solid var(--color-border);
 }
 
-.browser-category-label:first-child {
-  margin-top: 0;
+.browser-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.625rem;
 }
 
 .browser-product-btn {
@@ -358,7 +349,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem 0.5rem;
+  padding: 0.875rem 0.5rem;
   background: var(--color-surface);
   border: 1.5px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -367,9 +358,6 @@ body {
   text-align: center;
   min-height: 44px;
   box-shadow: var(--shadow-sm);
-  break-inside: avoid;
-  width: 100%;
-  margin-bottom: 0.5rem;
 }
 
 .browser-product-btn:hover {
@@ -585,8 +573,8 @@ body {
     border-radius: var(--radius-lg);
   }
 
-  .browser-flow {
-    columns: 2 120px;
+  .browser-product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   }
 
   .detail-header {
