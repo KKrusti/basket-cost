@@ -4,6 +4,7 @@ import (
 	"basket-cost/internal/database"
 	"basket-cost/internal/handlers"
 	"basket-cost/internal/store"
+	"basket-cost/internal/ticket"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,7 +13,7 @@ import (
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
 		if r.Method == http.MethodOptions {
@@ -33,7 +34,8 @@ func main() {
 	defer db.Close()
 
 	s := store.New(db)
-	h := handlers.New(s)
+	imp := ticket.NewImporter(ticket.NewExtractor(), ticket.NewMercadonaParser(), s)
+	h := handlers.New(s, imp)
 	mux := http.NewServeMux()
 
 	// GET /api/products?q=<query> — search products
@@ -41,6 +43,9 @@ func main() {
 
 	// GET /api/products/<id> — get product detail with price history
 	mux.HandleFunc("/api/products/", corsMiddleware(h.ProductHandler))
+
+	// POST /api/tickets — upload a Mercadona PDF receipt
+	mux.HandleFunc("/api/tickets", corsMiddleware(h.TicketHandler))
 
 	port := ":8080"
 	fmt.Printf("Basket Cost API server running on http://localhost%s\n", port)

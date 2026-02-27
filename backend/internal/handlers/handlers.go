@@ -3,18 +3,22 @@ package handlers
 
 import (
 	"basket-cost/internal/store"
+	"basket-cost/internal/ticket"
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 )
 
 // Handlers holds the shared dependencies injected at startup.
 type Handlers struct {
-	store store.Store
+	store    store.Store
+	importer *ticket.Importer
 }
 
-// New returns a Handlers instance wired to the given Store.
-func New(s store.Store) *Handlers {
-	return &Handlers{store: s}
+// New returns a Handlers instance wired to the given Store and Importer.
+func New(s store.Store, imp *ticket.Importer) *Handlers {
+	return &Handlers{store: s, importer: imp}
 }
 
 // SearchHandler handles GET /api/products?q=<query>
@@ -63,4 +67,53 @@ func (h *Handlers) ProductHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(product)
+}
+
+// ticketResponse is the JSON body returned by TicketHandler on success.
+type ticketResponse struct {
+	InvoiceNumber string `json:"invoiceNumber"`
+	LinesImported int    `json:"linesImported"`
+}
+
+// TicketHandler handles POST /api/tickets
+// Accepts a multipart/form-data request with a "file" field containing a PDF.
+// It parses the receipt and persists the extracted price data.
+func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Limit upload to 10 MB to guard against oversized payloads.
+	const maxUploadSize = 10 << 20
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		http.Error(w, "Bad request: could not parse form", http.StatusBadRequest)
+		return
+	}
+
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Bad request: missing 'file' field", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		http.Error(w, "Internal server error: could not read file", http.StatusInternalServerError)
+		return
+	}
+
+	result, err := h.importer.Import(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		http.Error(w, "Unprocessable entity: "+err.Error(), http.StatusUnprocessableEntity)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(ticketResponse{
+		InvoiceNumber: result.InvoiceNumber,
+		LinesImported: result.LinesImported,
+	})
 }

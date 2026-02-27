@@ -5,6 +5,7 @@ import (
 	"basket-cost/internal/models"
 	"database/sql"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -15,6 +16,9 @@ type Store interface {
 	SearchProducts(query string) ([]models.SearchResult, error)
 	GetProductByID(id string) (*models.Product, error)
 	InsertProduct(p models.Product) error
+	// UpsertPriceRecord ensures the named product exists (creating it if needed)
+	// and appends a new price record for the given observation.
+	UpsertPriceRecord(name string, record models.PriceRecord) error
 }
 
 // SQLiteStore is the production Store backed by a *sql.DB.
@@ -111,6 +115,51 @@ func (s *SQLiteStore) SearchProducts(query string) ([]models.SearchResult, error
 		results = []models.SearchResult{}
 	}
 	return results, nil
+}
+
+// reNonAlphanumeric matches any character that is not a lowercase letter or digit.
+var reNonAlphanumeric = regexp.MustCompile(`[^a-z0-9]+`)
+
+// slugify converts a product name to a stable, URL-safe ID.
+// Example: "LECHE ENTERA HACENDADO 1L" → "leche-entera-hacendado-1l"
+func slugify(name string) string {
+	lower := strings.ToLower(name)
+	slug := reNonAlphanumeric.ReplaceAllString(lower, "-")
+	slug = strings.Trim(slug, "-")
+	return slug
+}
+
+// UpsertPriceRecord ensures a product with the given name exists in the
+// database (creating it with a generated ID if necessary) and then inserts a
+// new price record for it.
+func (s *SQLiteStore) UpsertPriceRecord(name string, record models.PriceRecord) error {
+	id := slugify(name)
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Insert product if it does not exist yet.
+	_, err = tx.Exec(
+		`INSERT OR IGNORE INTO products (id, name, category) VALUES (?, ?, ?)`,
+		id, name, "",
+	)
+	if err != nil {
+		return fmt.Errorf("upsert product %q: %w", name, err)
+	}
+
+	// Insert the price record.
+	_, err = tx.Exec(
+		`INSERT INTO price_records (product_id, date, price, store) VALUES (?, ?, ?, ?)`,
+		id, record.Date.Format(time.DateOnly), record.Price, record.Store,
+	)
+	if err != nil {
+		return fmt.Errorf("insert price record for product %q: %w", name, err)
+	}
+
+	return tx.Commit()
 }
 
 // GetProductByID returns the full product with its price history, or nil if not found.

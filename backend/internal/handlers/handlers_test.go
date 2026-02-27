@@ -1,7 +1,12 @@
 package handlers_test
 
 import (
+	"bytes"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +16,7 @@ import (
 	"basket-cost/internal/handlers"
 	"basket-cost/internal/models"
 	"basket-cost/internal/store"
+	"basket-cost/internal/ticket"
 )
 
 // newHandlers creates a Handlers instance backed by an in-memory SQLite DB
@@ -52,7 +58,7 @@ func newHandlers(t *testing.T) *handlers.Handlers {
 		}
 	}
 
-	return handlers.New(s)
+	return handlers.New(s, nil)
 }
 
 // --- SearchHandler ---
@@ -193,4 +199,175 @@ func TestProductHandler_ContentTypeJSON(t *testing.T) {
 	if ct != "application/json" {
 		t.Errorf("expected Content-Type 'application/json', got '%s'", ct)
 	}
+}
+
+// --- TicketHandler fakes ---
+
+// fakeExtractor and fakeParser are defined here so tests stay self-contained.
+
+type fakeTicketExtractor struct {
+	text string
+	err  error
+}
+
+func (f *fakeTicketExtractor) Extract(_ io.ReaderAt, _ int64) (string, error) {
+	return f.text, f.err
+}
+
+type fakeTicketParser struct {
+	t   *ticket.Ticket
+	err error
+}
+
+func (f *fakeTicketParser) Parse(_ string) (*ticket.Ticket, error) {
+	return f.t, f.err
+}
+
+// stubTicketStore implements ticket.TicketStore; it satisfies store.Store via
+// embedding a *store.SQLiteStore so the same Handlers struct can hold both.
+// For TicketHandler tests we only need UpsertPriceRecord, so we use a plain DB.
+
+// newHandlersWithImporter creates a Handlers instance wired with the given Importer.
+func newHandlersWithImporter(t *testing.T, imp *ticket.Importer) *handlers.Handlers {
+	t.Helper()
+	db, err := database.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open test DB: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	s := store.New(db)
+	return handlers.New(s, imp)
+}
+
+// buildMultipartRequest creates a multipart POST request with a "file" field
+// containing the given data.
+func buildMultipartRequest(t *testing.T, data []byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "ticket.pdf")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write(data); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	mw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tickets", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	return req
+}
+
+// sampleImportTicket returns a minimal Ticket used by fake parsers in handler tests.
+func sampleImportTicket() *ticket.Ticket {
+	return &ticket.Ticket{
+		Store:         "Mercadona",
+		Date:          time.Date(2026, 2, 9, 0, 0, 0, 0, time.UTC),
+		InvoiceNumber: "4144-017-284404",
+		Lines: []ticket.TicketLine{
+			{Name: "LECHE ENTERA HACENDADO 1L", UnitPrice: 0.89, Quantity: 1},
+		},
+	}
+}
+
+// --- TicketHandler tests ---
+
+func TestTicketHandler_MethodNotAllowed(t *testing.T) {
+	imp := ticket.NewImporter(&fakeTicketExtractor{}, &fakeTicketParser{t: sampleImportTicket()}, store.New(mustOpenMemDB(t)))
+	h := newHandlersWithImporter(t, imp)
+	req := httptest.NewRequest(http.MethodGet, "/api/tickets", nil)
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestTicketHandler_MissingFileField_ReturnsBadRequest(t *testing.T) {
+	imp := ticket.NewImporter(&fakeTicketExtractor{}, &fakeTicketParser{t: sampleImportTicket()}, store.New(mustOpenMemDB(t)))
+	h := newHandlersWithImporter(t, imp)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/tickets", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestTicketHandler_ValidPDF_ReturnsCreated(t *testing.T) {
+	db := mustOpenMemDB(t)
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{text: "raw text"},
+		&fakeTicketParser{t: sampleImportTicket()},
+		store.New(db),
+	)
+	h := newHandlersWithImporter(t, imp)
+
+	req := buildMultipartRequest(t, []byte("%PDF-1.4 fake"))
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTicketHandler_ValidPDF_ResponseJSON(t *testing.T) {
+	db := mustOpenMemDB(t)
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{text: "raw text"},
+		&fakeTicketParser{t: sampleImportTicket()},
+		store.New(db),
+	)
+	h := newHandlersWithImporter(t, imp)
+
+	req := buildMultipartRequest(t, []byte("%PDF-1.4 fake"))
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+
+	var resp struct {
+		InvoiceNumber string `json:"invoiceNumber"`
+		LinesImported int    `json:"linesImported"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.InvoiceNumber != "4144-017-284404" {
+		t.Errorf("invoiceNumber: want %q, got %q", "4144-017-284404", resp.InvoiceNumber)
+	}
+	if resp.LinesImported != 1 {
+		t.Errorf("linesImported: want 1, got %d", resp.LinesImported)
+	}
+}
+
+func TestTicketHandler_ImporterError_ReturnsUnprocessable(t *testing.T) {
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{err: errors.New("corrupt pdf")},
+		&fakeTicketParser{},
+		store.New(mustOpenMemDB(t)),
+	)
+	h := newHandlersWithImporter(t, imp)
+	req := buildMultipartRequest(t, []byte("not a pdf"))
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d", w.Code)
+	}
+}
+
+// mustOpenMemDB is a test helper that opens an in-memory SQLite database.
+func mustOpenMemDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := database.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open mem DB: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
 }
