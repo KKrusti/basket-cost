@@ -38,9 +38,9 @@ describe('ProductBrowser', () => {
   it('renders a button for each product', async () => {
     vi.mocked(productsApi.getAllProducts).mockResolvedValue(mockProducts);
     render(<ProductBrowser onSelectProduct={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'LECHE ENTERA HACENDADO 1L' })).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'YOGUR NATURAL DANONE PACK 4' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'ARROZ LARGO SOS 1KG' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('LECHE ENTERA HACENDADO 1L')).toBeInTheDocument());
+    expect(screen.getByLabelText('YOGUR NATURAL DANONE PACK 4')).toBeInTheDocument();
+    expect(screen.getByLabelText('ARROZ LARGO SOS 1KG')).toBeInTheDocument();
   });
 
   it('renders no category separators', async () => {
@@ -64,8 +64,8 @@ describe('ProductBrowser', () => {
     vi.mocked(productsApi.getAllProducts).mockResolvedValue(mockProducts);
     const onSelect = vi.fn();
     render(<ProductBrowser onSelectProduct={onSelect} />);
-    await waitFor(() => screen.getByRole('button', { name: 'LECHE ENTERA HACENDADO 1L' }));
-    await userEvent.click(screen.getByRole('button', { name: 'LECHE ENTERA HACENDADO 1L' }));
+    await waitFor(() => screen.getByLabelText('LECHE ENTERA HACENDADO 1L'));
+    await userEvent.click(screen.getByLabelText('LECHE ENTERA HACENDADO 1L'));
     expect(onSelect).toHaveBeenCalledWith('1');
   });
 
