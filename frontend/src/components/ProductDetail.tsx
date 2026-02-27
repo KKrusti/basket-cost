@@ -22,6 +22,23 @@ interface ChartDataPoint {
   store: string;
 }
 
+function BackArrowIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <line x1="19" y1="12" x2="5" y2="12" />
+      <polyline points="12 19 5 12 12 5" />
+    </svg>
+  );
+}
+
 export default function ProductDetail({ productId, onBack }: ProductDetailProps) {
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,7 +68,8 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
       <div className="empty-state">
         <p>Product not found</p>
         <button className="back-btn" onClick={onBack}>
-          &larr; Back to search
+          <BackArrowIcon />
+          Back to search
         </button>
       </div>
     );
@@ -88,66 +106,93 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
 
   return (
     <div className="product-detail">
-      <button className="back-btn" onClick={onBack}>
-        &larr; Back to search
+      <button className="back-btn" onClick={onBack} aria-label="Back to search">
+        <BackArrowIcon />
+        Back to search
       </button>
 
       <div className="detail-header">
-        <h2>{product.name}</h2>
-        {product.category && <span className="category">{product.category}</span>}
-        <div className="price">{formatPrice(product.currentPrice)}</div>
+        <div className="detail-header__info">
+          <h2>{product.name}</h2>
+          {product.category && (
+            <span className="category">{product.category}</span>
+          )}
+        </div>
+        <div className="detail-header__price">
+          <div className="price">{formatPrice(product.currentPrice)}</div>
+          <div className="detail-header__price-label">precio actual</div>
+        </div>
       </div>
 
+      <hr className="detail-divider" />
+
       <div className="chart-container">
-        <h3>Price history</h3>
-        <ResponsiveContainer width="100%" height={300}>
+        <h3 className="chart-container__title">Price history</h3>
+        <ResponsiveContainer width="100%" height={280}>
           <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
             <XAxis
               dataKey="date"
               tickFormatter={formatDateShort}
-              tick={{ fontSize: 12 }}
+              tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
+              axisLine={{ stroke: 'var(--color-border)' }}
+              tickLine={false}
             />
             <YAxis
               domain={[yMin, yMax]}
               tickFormatter={(v: number) => formatPrice(v)}
-              tick={{ fontSize: 12 }}
-              width={70}
+              tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
+              width={72}
+              axisLine={false}
+              tickLine={false}
             />
             <Tooltip
               formatter={(value: number) => [formatPrice(value), 'Price']}
               labelFormatter={(label: string) => formatDateFull(label)}
+              contentStyle={{
+                borderRadius: '10px',
+                border: '1.5px solid var(--color-border)',
+                boxShadow: 'var(--shadow-md)',
+                fontSize: '0.875rem',
+              }}
             />
             <Line
               type="monotone"
               dataKey="price"
-              stroke="#2d6a4f"
-              strokeWidth={2}
-              dot={{ r: 4, fill: '#2d6a4f' }}
-              activeDot={{ r: 6 }}
+              stroke="var(--color-primary)"
+              strokeWidth={2.5}
+              dot={{ r: 4, fill: 'var(--color-primary)', strokeWidth: 0 }}
+              activeDot={{ r: 6, fill: 'var(--color-primary-dark)', strokeWidth: 0 }}
             />
           </LineChart>
         </ResponsiveContainer>
       </div>
 
-      <table className="price-table">
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Price</th>
-            <th>Store</th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...product.priceHistory].reverse().map((record, i) => (
-            <tr key={i}>
-              <td>{formatDateFull(record.date)}</td>
-              <td>{formatPrice(record.price)}</td>
-              <td>{record.store || '-'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <hr className="detail-divider" />
+
+      <div>
+        <h3 className="price-table-section__title">Historial de precios</h3>
+        <div className="price-table-wrapper">
+          <table className="price-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Price</th>
+                <th>Store</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...product.priceHistory].reverse().map((record, i) => (
+                <tr key={i}>
+                  <td>{formatDateFull(record.date)}</td>
+                  <td className="price-cell">{formatPrice(record.price)}</td>
+                  <td className="store-cell">{record.store || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }

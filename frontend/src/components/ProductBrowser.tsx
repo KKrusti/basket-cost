@@ -33,11 +33,24 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
   }, []);
 
   if (loading) {
-    return <div className="loading">Cargando productos...</div>;
+    return (
+      <div>
+        <div className="loading">Cargando productos...</div>
+        <div className="browser-product-grid" aria-hidden="true">
+          {[1, 2, 3, 4, 5, 6].map((n) => (
+            <div key={n} className="skeleton" style={{ height: '100px' }} />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (error) {
-    return <div className="empty-state"><p>No se pudieron cargar los productos.</p></div>;
+    return (
+      <div className="empty-state">
+        <p>No se pudieron cargar los productos.</p>
+      </div>
+    );
   }
 
   // Group products by category
@@ -52,6 +65,7 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
 
   return (
     <div className="product-browser">
+      <p className="product-browser__intro">Explorar catálogo</p>
       {categories.map((category) => (
         <div key={category} className="browser-category">
           <h3 className="browser-category-title">{category}</h3>
@@ -61,6 +75,7 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
                 key={product.id}
                 className="browser-product-btn"
                 onClick={() => onSelectProduct(product.id)}
+                aria-label={product.name}
               >
                 <ProductImage productId={product.id} category={product.category} size="sm" />
                 <span className="browser-product-name">{product.name}</span>

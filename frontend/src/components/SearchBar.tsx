@@ -8,6 +8,43 @@ interface SearchBarProps {
   onSelectProduct: (id: string) => void;
 }
 
+function SearchIcon() {
+  return (
+    <svg
+      className="search-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+function EmptyResultsIcon() {
+  return (
+    <svg
+      className="empty-state__icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+    </svg>
+  );
+}
+
 export default function SearchBar({ onSelectProduct }: SearchBarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -46,6 +83,7 @@ export default function SearchBar({ onSelectProduct }: SearchBarProps) {
   return (
     <div>
       <div className="search-container">
+        <SearchIcon />
         <input
           type="text"
           className="search-input"
@@ -53,24 +91,38 @@ export default function SearchBar({ onSelectProduct }: SearchBarProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           autoFocus
+          aria-label="Buscar producto"
         />
       </div>
 
-      {loading && <div className="loading">Searching...</div>}
+      {loading && (
+        <div>
+          <div className="loading">Searching...</div>
+          <div className="product-list" aria-hidden="true">
+            {[1, 2, 3].map((n) => (
+              <div key={n} className="skeleton skeleton-card" />
+            ))}
+          </div>
+        </div>
+      )}
 
       {!loading && searched && results.length === 0 && (
         <div className="empty-state">
+          <EmptyResultsIcon />
           <p>No products found for &quot;{query}&quot;</p>
+          <p className="empty-state__hint">Prueba con otro término de búsqueda</p>
         </div>
       )}
 
       {!loading && results.length > 0 && (
-        <div className="product-list">
+        <div className="product-list" role="list">
           {results.map((product) => (
-            <div
+            <button
               key={product.id}
               className="product-card"
               onClick={() => onSelectProduct(product.id)}
+              role="listitem"
+              aria-label={`${product.name} — ${formatPrice(product.currentPrice)}`}
             >
               <ProductImage productId={product.id} category={product.category} size="md" />
               <div className="product-card-info">
@@ -82,10 +134,10 @@ export default function SearchBar({ onSelectProduct }: SearchBarProps) {
               <div className="product-card-price">
                 <div className="current">{formatPrice(product.currentPrice)}</div>
                 <div className="range">
-                  {formatPrice(product.minPrice)} - {formatPrice(product.maxPrice)}
+                  {formatPrice(product.minPrice)} – {formatPrice(product.maxPrice)}
                 </div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       )}
