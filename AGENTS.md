@@ -10,6 +10,13 @@ Always communicate with the user in **Spanish**, regardless of the language used
 
 ---
 
+## Skills
+
+- Before modifying any **frontend** code, load the `vercel-react-best-practices` skill.
+- Before modifying any **backend** code, load the `golang-pro` skill.
+
+---
+
 ## Project Overview
 
 Two-tier SPA for tracking grocery prices in the Spanish market.

@@ -6,6 +6,13 @@ import * as productsApi from '../api/products';
 import type { SearchResult } from '../types';
 
 vi.mock('../api/products');
+vi.mock('./ProductBrowser', () => ({
+  default: ({ onSelectProduct }: { onSelectProduct: (id: string) => void }) => (
+    <div data-testid="product-browser">
+      <button onClick={() => onSelectProduct('99')}>ProductBrowser</button>
+    </div>
+  ),
+}));
 
 const mockResults: SearchResult[] = [
   { id: '1', name: 'LECHE ENTERA HACENDADO 1L', category: 'Lácteos', currentPrice: 0.89, minPrice: 0.79, maxPrice: 0.89 },
@@ -22,9 +29,24 @@ describe('SearchBar', () => {
     expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
   });
 
-  it('shows the initial message when nothing has been searched', () => {
+  it('shows the product browser when nothing has been searched', () => {
     render(<SearchBar onSelectProduct={vi.fn()} />);
-    expect(screen.getByText(/type a product name/i)).toBeInTheDocument();
+    expect(screen.getByTestId('product-browser')).toBeInTheDocument();
+  });
+
+  it('hides the product browser once the user starts typing', async () => {
+    vi.mocked(productsApi.searchProducts).mockResolvedValue(mockResults);
+    render(<SearchBar onSelectProduct={vi.fn()} />);
+    await userEvent.type(screen.getByRole('textbox'), 'leche');
+    await waitFor(() => expect(screen.getByText('LECHE ENTERA HACENDADO 1L')).toBeInTheDocument());
+    expect(screen.queryByTestId('product-browser')).not.toBeInTheDocument();
+  });
+
+  it('forwards onSelectProduct from the product browser', async () => {
+    const onSelect = vi.fn();
+    render(<SearchBar onSelectProduct={onSelect} />);
+    await userEvent.click(screen.getByText('ProductBrowser'));
+    expect(onSelect).toHaveBeenCalledWith('99');
   });
 
   it('shows "Searching..." while loading', async () => {

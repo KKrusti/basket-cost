@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchProducts, getProduct } from './products';
+import { searchProducts, getAllProducts, getProduct } from './products';
 import type { SearchResult, Product } from '../types';
 
 const mockSearchResults: SearchResult[] = [
@@ -60,6 +60,38 @@ describe('searchProducts', () => {
 
     const results = await searchProducts('xyznonexistent');
     expect(results).toEqual([]);
+  });
+});
+
+describe('getAllProducts', () => {
+  it('calls the correct endpoint with an empty query', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSearchResults),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getAllProducts();
+    expect(fetchMock).toHaveBeenCalledWith('/api/products?q=');
+  });
+
+  it('returns all products from the response', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockSearchResults),
+    }));
+
+    const results = await getAllProducts();
+    expect(results).toEqual(mockSearchResults);
+  });
+
+  it('throws an Error when the response is not OK', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      statusText: 'Internal Server Error',
+    }));
+
+    await expect(getAllProducts()).rejects.toThrow('Search failed: Internal Server Error');
   });
 });
 

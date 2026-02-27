@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { SearchResult } from '../types';
 import { searchProducts } from '../api/products';
+import ProductBrowser from './ProductBrowser';
+import ProductImage from './ProductImage';
 
 interface SearchBarProps {
   onSelectProduct: (id: string) => void;
@@ -70,6 +72,7 @@ export default function SearchBar({ onSelectProduct }: SearchBarProps) {
               className="product-card"
               onClick={() => onSelectProduct(product.id)}
             >
+              <ProductImage productId={product.id} category={product.category} size="md" />
               <div className="product-card-info">
                 <h3>{product.name}</h3>
                 {product.category && (
@@ -88,9 +91,7 @@ export default function SearchBar({ onSelectProduct }: SearchBarProps) {
       )}
 
       {!loading && !searched && (
-        <div className="empty-state">
-          <p>Type a product name to view its price history</p>
-        </div>
+        <ProductBrowser onSelectProduct={onSelectProduct} />
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from './App';
@@ -29,6 +29,10 @@ const mockProduct: Product = {
     { date: '2025-01-15T00:00:00Z', price: 0.79, store: 'Mercadona' },
   ],
 };
+
+beforeEach(() => {
+  vi.mocked(productsApi.getAllProducts).mockResolvedValue([]);
+});
 
 describe('App', () => {
   it('renders the application title', () => {
