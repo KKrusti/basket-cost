@@ -1,0 +1,59 @@
+version: '3'
+
+tasks:
+  backend:
+    desc: Levanta solo el servidor backend (Go) en http://localhost:8080
+    dir: backend
+    cmds:
+      - go run ./cmd/server/main.go
+
+  dev:
+    desc: Levanta backend + frontend. Frontend disponible en http://localhost:5173
+    cmds:
+      - task: dev:deps
+      - echo "Backend ->  http://localhost:8080"
+      - echo "Frontend -> http://localhost:5173"
+      - task --parallel dev:backend dev:frontend
+
+  dev:deps:
+    desc: Instala dependencias del frontend en filesystem Linux nativo (evita problemas NTFS)
+    vars:
+      NM_LINUX: /home/carlos/.npm-workspaces/basket-cost
+    cmds:
+      - mkdir -p {{.NM_LINUX}}
+      - cp frontend/package.json {{.NM_LINUX}}/package.json
+      - npm install --prefix {{.NM_LINUX}}
+      - |
+        if [ ! -L frontend/node_modules ]; then
+          rm -rf frontend/node_modules
+          ln -s {{.NM_LINUX}}/node_modules frontend/node_modules
+        fi
+    silent: true
+
+  test:backend:
+    desc: Corre los tests del backend (Go)
+    dir: backend
+    cmds:
+      - go test ./...
+
+  test:frontend:
+    desc: Corre los tests del frontend (Vitest)
+    dir: frontend
+    cmds:
+      - npm test
+
+  test:
+    desc: Corre todos los tests (backend + frontend)
+    cmds:
+      - task: test:backend
+      - task: test:frontend
+
+  dev:backend:
+    dir: backend
+    cmds:
+      - go run ./cmd/server/main.go
+
+  dev:frontend:
+    dir: frontend
+    cmds:
+      - npm run dev
