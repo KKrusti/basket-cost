@@ -1,0 +1,325 @@
+package store_test
+
+import (
+	"testing"
+	"time"
+
+	"basket-cost/internal/database"
+	"basket-cost/internal/models"
+	"basket-cost/internal/store"
+)
+
+// newTestStore opens an in-memory SQLite DB, applies migrations, and returns a
+// ready-to-use SQLiteStore. The caller does not need to close it (test cleanup
+// handles the underlying *sql.DB via t.Cleanup).
+func newTestStore(t *testing.T) *store.SQLiteStore {
+	t.Helper()
+	db, err := database.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open test DB: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return store.New(db)
+}
+
+func date(year, month, day int) time.Time {
+	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+}
+
+// sampleProduct returns a deterministic product for use across tests.
+func sampleProduct(id string) models.Product {
+	return models.Product{
+		ID:       id,
+		Name:     "LECHE ENTERA HACENDADO 1L",
+		Category: "Lácteos",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 10), Price: 0.79, Store: "Mercadona"},
+			{Date: date(2025, 6, 15), Price: 0.85, Store: "Mercadona"},
+			{Date: date(2026, 1, 20), Price: 0.89, Store: "Mercadona"},
+		},
+	}
+}
+
+// ---------- InsertProduct ----------
+
+func TestInsertProduct_Success(t *testing.T) {
+	s := newTestStore(t)
+	p := sampleProduct("1")
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("InsertProduct returned unexpected error: %v", err)
+	}
+}
+
+func TestInsertProduct_Idempotent(t *testing.T) {
+	s := newTestStore(t)
+	p := sampleProduct("1")
+
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("first insert: %v", err)
+	}
+	// Second insert of same product must not error (INSERT OR IGNORE).
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("second insert (idempotent): %v", err)
+	}
+}
+
+func TestInsertProduct_PriceHistoryPersisted(t *testing.T) {
+	s := newTestStore(t)
+	p := sampleProduct("42")
+
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("InsertProduct: %v", err)
+	}
+
+	got, err := s.GetProductByID("42")
+	if err != nil {
+		t.Fatalf("GetProductByID: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected product, got nil")
+	}
+	if len(got.PriceHistory) != len(p.PriceHistory) {
+		t.Errorf("price history length: want %d, got %d", len(p.PriceHistory), len(got.PriceHistory))
+	}
+}
+
+// ---------- GetProductByID ----------
+
+func TestGetProductByID_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetProductByID("nonexistent")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for missing product, got %+v", got)
+	}
+}
+
+func TestGetProductByID_Fields(t *testing.T) {
+	s := newTestStore(t)
+	p := sampleProduct("7")
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := s.GetProductByID("7")
+	if err != nil {
+		t.Fatalf("GetProductByID: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected product, got nil")
+	}
+
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"ID", got.ID, p.ID},
+		{"Name", got.Name, p.Name},
+		{"Category", got.Category, p.Category},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("want %q, got %q", tt.want, tt.got)
+			}
+		})
+	}
+}
+
+func TestGetProductByID_CurrentPriceDerivedFromLatestRecord(t *testing.T) {
+	s := newTestStore(t)
+	p := sampleProduct("5")
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := s.GetProductByID("5")
+	if err != nil {
+		t.Fatalf("GetProductByID: %v", err)
+	}
+	// Latest record (2026-01-20) has Price 0.89.
+	if got.CurrentPrice != 0.89 {
+		t.Errorf("CurrentPrice: want 0.89, got %f", got.CurrentPrice)
+	}
+}
+
+func TestGetProductByID_PriceHistoryOrderedByDate(t *testing.T) {
+	s := newTestStore(t)
+	// Insert records deliberately out of order.
+	p := models.Product{
+		ID:       "99",
+		Name:     "TEST PRODUCT",
+		Category: "Test",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 6, 1), Price: 2.00, Store: "A"},
+			{Date: date(2025, 1, 1), Price: 1.00, Store: "A"},
+			{Date: date(2025, 12, 1), Price: 3.00, Store: "A"},
+		},
+	}
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := s.GetProductByID("99")
+	if err != nil {
+		t.Fatalf("GetProductByID: %v", err)
+	}
+
+	for i := 1; i < len(got.PriceHistory); i++ {
+		if got.PriceHistory[i].Date.Before(got.PriceHistory[i-1].Date) {
+			t.Errorf("price history not ordered by date at index %d", i)
+		}
+	}
+}
+
+// ---------- SearchProducts ----------
+
+func TestSearchProducts_EmptyQuery_ReturnsAll(t *testing.T) {
+	s := newTestStore(t)
+
+	products := []models.Product{
+		{ID: "a", Name: "LECHE ENTERA", Category: "Lácteos", PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 0.89, Store: "Mercadona"},
+		}},
+		{ID: "b", Name: "PAN INTEGRAL", Category: "Panadería", PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 1.25, Store: "Mercadona"},
+		}},
+	}
+	for _, p := range products {
+		if err := s.InsertProduct(p); err != nil {
+			t.Fatalf("insert %s: %v", p.ID, err)
+		}
+	}
+
+	results, err := s.SearchProducts("")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("want 2 results, got %d", len(results))
+	}
+}
+
+func TestSearchProducts_WithQuery_ReturnsMatches(t *testing.T) {
+	s := newTestStore(t)
+
+	products := []models.Product{
+		{ID: "a", Name: "LECHE ENTERA HACENDADO", Category: "Lácteos", PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 0.89, Store: "Mercadona"},
+		}},
+		{ID: "b", Name: "PAN INTEGRAL BIMBO", Category: "Panadería", PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 1.25, Store: "Mercadona"},
+		}},
+	}
+	for _, p := range products {
+		if err := s.InsertProduct(p); err != nil {
+			t.Fatalf("insert %s: %v", p.ID, err)
+		}
+	}
+
+	results, err := s.SearchProducts("leche")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("want 1 result, got %d", len(results))
+	}
+	if len(results) > 0 && results[0].ID != "a" {
+		t.Errorf("want product 'a', got %q", results[0].ID)
+	}
+}
+
+func TestSearchProducts_NoMatch_ReturnsEmptySlice(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.InsertProduct(sampleProduct("1")); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	results, err := s.SearchProducts("xyznonexistent")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if results == nil {
+		t.Error("want empty slice, got nil")
+	}
+	if len(results) != 0 {
+		t.Errorf("want 0 results, got %d", len(results))
+	}
+}
+
+func TestSearchProducts_CaseInsensitive(t *testing.T) {
+	s := newTestStore(t)
+	p := models.Product{
+		ID:       "ci",
+		Name:     "LECHE ENTERA",
+		Category: "Lácteos",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 0.89, Store: "Mercadona"},
+		},
+	}
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	for _, q := range []string{"leche", "LECHE", "Leche", "lEcHe"} {
+		t.Run(q, func(t *testing.T) {
+			results, err := s.SearchProducts(q)
+			if err != nil {
+				t.Fatalf("SearchProducts(%q): %v", q, err)
+			}
+			if len(results) != 1 {
+				t.Errorf("query %q: want 1 result, got %d", q, len(results))
+			}
+		})
+	}
+}
+
+func TestSearchProducts_MinMaxPrice(t *testing.T) {
+	s := newTestStore(t)
+	p := models.Product{
+		ID:       "mm",
+		Name:     "ACEITE OLIVA",
+		Category: "Aceites",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 5.00, Store: "A"},
+			{Date: date(2025, 6, 1), Price: 8.00, Store: "A"},
+			{Date: date(2025, 12, 1), Price: 6.50, Store: "A"},
+		},
+	}
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	results, err := s.SearchProducts("")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 result, got %d", len(results))
+	}
+
+	r := results[0]
+	if r.MinPrice != 5.00 {
+		t.Errorf("MinPrice: want 5.00, got %f", r.MinPrice)
+	}
+	if r.MaxPrice != 8.00 {
+		t.Errorf("MaxPrice: want 8.00, got %f", r.MaxPrice)
+	}
+}
+
+func TestSearchProducts_EmptyDB_ReturnsEmptySlice(t *testing.T) {
+	s := newTestStore(t)
+	results, err := s.SearchProducts("")
+	if err != nil {
+		t.Fatalf("SearchProducts on empty DB: %v", err)
+	}
+	if results == nil {
+		t.Error("want empty slice, got nil")
+	}
+	if len(results) != 0 {
+		t.Errorf("want 0 results, got %d", len(results))
+	}
+}

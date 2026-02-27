@@ -1,7 +1,9 @@
 package main
 
 import (
+	"basket-cost/internal/database"
 	"basket-cost/internal/handlers"
+	"basket-cost/internal/store"
 	"fmt"
 	"log"
 	"net/http"
@@ -23,13 +25,22 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 }
 
 func main() {
+	// Open (or create) the SQLite database file.
+	db, err := database.Open("basket-cost.db")
+	if err != nil {
+		log.Fatalf("open database: %v", err)
+	}
+	defer db.Close()
+
+	s := store.New(db)
+	h := handlers.New(s)
 	mux := http.NewServeMux()
 
 	// GET /api/products?q=<query> — search products
-	mux.HandleFunc("/api/products", corsMiddleware(handlers.SearchHandler))
+	mux.HandleFunc("/api/products", corsMiddleware(h.SearchHandler))
 
 	// GET /api/products/<id> — get product detail with price history
-	mux.HandleFunc("/api/products/", corsMiddleware(handlers.ProductHandler))
+	mux.HandleFunc("/api/products/", corsMiddleware(h.ProductHandler))
 
 	port := ":8080"
 	fmt.Printf("Basket Cost API server running on http://localhost%s\n", port)
