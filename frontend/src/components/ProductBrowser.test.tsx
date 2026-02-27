@@ -14,8 +14,8 @@ const mockProducts: SearchResult[] = [
   { id: '10', name: 'PLATANOS KG', category: undefined, currentPrice: 1.99, minPrice: 1.69, maxPrice: 1.99 },
 ];
 
-// 14 extra products to test pagination (total: 18 > 12 default page size)
-const manyProducts: SearchResult[] = Array.from({ length: 18 }, (_, i) => ({
+// 25 products to test pagination (total: 25 > 24 default page size)
+const manyProducts: SearchResult[] = Array.from({ length: 25 }, (_, i) => ({
   id: String(i + 1),
   name: `PRODUCTO ${i + 1}`,
   category: 'Test',
@@ -104,7 +104,7 @@ describe('ProductBrowser', () => {
     render(<ProductBrowser onSelectProduct={vi.fn()} />);
     await waitFor(() => screen.getByTestId('browser-grid'));
 
-    // Default page size is 12; 18 products → 2 pages.
+    // Default page size is 24; 25 products → 2 pages.
     expect(screen.getByRole('navigation', { name: 'Paginación' })).toBeInTheDocument();
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
   });
@@ -144,8 +144,8 @@ describe('ProductBrowser', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Página siguiente' }));
     expect(screen.getByText('2 / 2')).toBeInTheDocument();
 
-    // Change page size to 24 (all 18 fit in one page → no pagination rendered).
-    await userEvent.click(screen.getByRole('button', { name: '24' }));
+    // Change page size to 48 (all 25 fit in one page → no pagination rendered).
+    await userEvent.click(screen.getByRole('button', { name: '48' }));
     expect(screen.queryByRole('navigation', { name: 'Paginación' })).not.toBeInTheDocument();
   });
 

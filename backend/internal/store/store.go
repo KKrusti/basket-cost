@@ -19,6 +19,8 @@ type Store interface {
 	// UpsertPriceRecord ensures the named product exists (creating it if needed)
 	// and appends a new price record for the given observation.
 	UpsertPriceRecord(name string, record models.PriceRecord) error
+	// UpdateProductImageURL sets the image URL for the product with the given ID.
+	UpdateProductImageURL(id, imageURL string) error
 }
 
 // SQLiteStore is the production Store backed by a *sql.DB.
@@ -69,6 +71,7 @@ func (s *SQLiteStore) SearchProducts(query string) ([]models.SearchResult, error
 			p.id,
 			p.name,
 			p.category,
+			p.image_url,
 			(SELECT price FROM price_records WHERE product_id = p.id ORDER BY date DESC LIMIT 1) AS current_price,
 			(SELECT MIN(price) FROM price_records WHERE product_id = p.id)                        AS min_price,
 			(SELECT MAX(price) FROM price_records WHERE product_id = p.id)                        AS max_price
@@ -96,12 +99,13 @@ func (s *SQLiteStore) SearchProducts(query string) ([]models.SearchResult, error
 	var results []models.SearchResult
 	for rows.Next() {
 		var r models.SearchResult
-		var category sql.NullString
+		var category, imageURL sql.NullString
 		var currentPrice, minPrice, maxPrice sql.NullFloat64
-		if err := rows.Scan(&r.ID, &r.Name, &category, &currentPrice, &minPrice, &maxPrice); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &category, &imageURL, &currentPrice, &minPrice, &maxPrice); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 		r.Category = category.String
+		r.ImageURL = imageURL.String
 		r.CurrentPrice = currentPrice.Float64
 		r.MinPrice = minPrice.Float64
 		r.MaxPrice = maxPrice.Float64
@@ -165,18 +169,19 @@ func (s *SQLiteStore) UpsertPriceRecord(name string, record models.PriceRecord) 
 // GetProductByID returns the full product with its price history, or nil if not found.
 func (s *SQLiteStore) GetProductByID(id string) (*models.Product, error) {
 	row := s.db.QueryRow(
-		`SELECT id, name, category FROM products WHERE id = ?`, id,
+		`SELECT id, name, category, image_url FROM products WHERE id = ?`, id,
 	)
 
 	var p models.Product
-	var category sql.NullString
-	if err := row.Scan(&p.ID, &p.Name, &category); err != nil {
+	var category, imageURL sql.NullString
+	if err := row.Scan(&p.ID, &p.Name, &category, &imageURL); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("get product %s: %w", id, err)
 	}
 	p.Category = category.String
+	p.ImageURL = imageURL.String
 
 	rows, err := s.db.Query(
 		`SELECT date, price, store FROM price_records WHERE product_id = ? ORDER BY date ASC`,
@@ -209,4 +214,16 @@ func (s *SQLiteStore) GetProductByID(id string) (*models.Product, error) {
 	}
 
 	return &p, nil
+}
+
+// UpdateProductImageURL sets the image_url for the product with the given ID.
+// It is a no-op if no product with that ID exists.
+func (s *SQLiteStore) UpdateProductImageURL(id, imageURL string) error {
+	_, err := s.db.Exec(
+		`UPDATE products SET image_url = ? WHERE id = ?`, imageURL, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update image_url for product %s: %w", id, err)
+	}
+	return nil
 }

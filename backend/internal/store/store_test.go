@@ -323,3 +323,58 @@ func TestSearchProducts_EmptyDB_ReturnsEmptySlice(t *testing.T) {
 		t.Errorf("want 0 results, got %d", len(results))
 	}
 }
+
+// ---------- UpdateProductImageURL ----------
+
+func TestUpdateProductImageURL_SetsURL(t *testing.T) {
+	s := newTestStore(t)
+	p := sampleProduct("img-test")
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	const url = "https://prod-mercadona.imgix.net/images/abc123.jpg?fit=crop&h=300&w=300"
+	if err := s.UpdateProductImageURL("img-test", url); err != nil {
+		t.Fatalf("UpdateProductImageURL: %v", err)
+	}
+
+	got, err := s.GetProductByID("img-test")
+	if err != nil {
+		t.Fatalf("GetProductByID: %v", err)
+	}
+	if got.ImageURL != url {
+		t.Errorf("ImageURL: want %q, got %q", url, got.ImageURL)
+	}
+}
+
+func TestUpdateProductImageURL_SearchResultIncludesURL(t *testing.T) {
+	s := newTestStore(t)
+	p := sampleProduct("img-search")
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	const url = "https://prod-mercadona.imgix.net/images/xyz.jpg?fit=crop&h=300&w=300"
+	if err := s.UpdateProductImageURL("img-search", url); err != nil {
+		t.Fatalf("UpdateProductImageURL: %v", err)
+	}
+
+	results, err := s.SearchProducts("")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 result, got %d", len(results))
+	}
+	if results[0].ImageURL != url {
+		t.Errorf("SearchResult.ImageURL: want %q, got %q", url, results[0].ImageURL)
+	}
+}
+
+func TestUpdateProductImageURL_NoOpOnMissingProduct(t *testing.T) {
+	s := newTestStore(t)
+	// Must not return an error even if the product does not exist.
+	if err := s.UpdateProductImageURL("nonexistent", "http://example.com/img.jpg"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

@@ -72,7 +72,7 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [columns, setColumns] = useState<Columns>(3);
-  const [pageSize, setPageSize] = useState<PageSize>(12);
+  const [pageSize, setPageSize] = useState<PageSize>(24);
   const [page, setPage] = useState(0);
 
   useEffect(() => {

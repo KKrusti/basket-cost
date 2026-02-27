@@ -52,7 +52,8 @@ func applyPragmas(db *sql.DB) error {
 // migrate creates all required tables if they do not exist.
 // Add new migrations as numbered steps below; never alter existing ones.
 func migrate(db *sql.DB) error {
-	schema := `
+	// Migration 1: base schema.
+	m1 := `
 		CREATE TABLE IF NOT EXISTS products (
 			id       TEXT PRIMARY KEY,
 			name     TEXT NOT NULL,
@@ -70,8 +71,24 @@ func migrate(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_price_records_product_id
 			ON price_records(product_id);
 	`
-	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("migrate schema: %w", err)
+	if _, err := db.Exec(m1); err != nil {
+		return fmt.Errorf("migrate m1: %w", err)
 	}
+
+	// Migration 2: add image_url column (idempotent via ALTER TABLE IF NOT EXISTS column pattern).
+	// SQLite does not support IF NOT EXISTS for ADD COLUMN, so we check the column first.
+	var colCount int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('products') WHERE name='image_url'`,
+	).Scan(&colCount)
+	if err != nil {
+		return fmt.Errorf("migrate m2 check: %w", err)
+	}
+	if colCount == 0 {
+		if _, err := db.Exec(`ALTER TABLE products ADD COLUMN image_url TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("migrate m2 add column: %w", err)
+		}
+	}
+
 	return nil
 }

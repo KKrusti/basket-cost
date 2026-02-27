@@ -20,3 +20,8 @@ export interface SearchResult {
   minPrice: number;
   maxPrice: number;
 }
+
+export interface TicketUploadResult {
+  invoiceNumber: string;
+  linesImported: number;
+}

@@ -1,0 +1,204 @@
+// Package enricher fetches product images from the Mercadona public API
+// and stores them in the local database.
+package enricher
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+	"unicode"
+)
+
+const (
+	mercadonaBaseURL   = "https://tienda.mercadona.es/api"
+	mercadonaLang      = "es"
+	defaultHTTPTimeout = 15 * time.Second
+)
+
+// MercadonaClient fetches product data from the Mercadona public REST API.
+type MercadonaClient struct {
+	http    *http.Client
+	baseURL string
+}
+
+// NewMercadonaClient returns a MercadonaClient with a sensible default timeout.
+func NewMercadonaClient() *MercadonaClient {
+	return &MercadonaClient{
+		http:    &http.Client{Timeout: defaultHTTPTimeout},
+		baseURL: mercadonaBaseURL,
+	}
+}
+
+// --- API response types (unexported; only used internally) ---
+
+type categoriesResponse struct {
+	Results []topCategory `json:"results"`
+}
+
+type topCategory struct {
+	ID         int           `json:"id"`
+	Name       string        `json:"name"`
+	Categories []subCategory `json:"categories"`
+}
+
+type subCategory struct {
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Published bool   `json:"published"`
+}
+
+type categoryDetailResponse struct {
+	Categories []subCategoryDetail `json:"categories"`
+}
+
+type subCategoryDetail struct {
+	Products []mercadonaProduct `json:"products"`
+}
+
+type mercadonaProduct struct {
+	DisplayName string `json:"display_name"`
+	Thumbnail   string `json:"thumbnail"`
+}
+
+// ProductIndex maps a normalised product name to a thumbnail URL.
+// Normalisation: lowercase, strip non-letter/digit runes, collapse spaces.
+type ProductIndex map[string]string
+
+// BuildProductIndex downloads all published subcategories from Mercadona,
+// collects every product's display_name and thumbnail, and returns an index
+// suitable for matching by normalised name.
+func (c *MercadonaClient) BuildProductIndex(ctx context.Context) (ProductIndex, error) {
+	subcatIDs, err := c.fetchSubcategoryIDs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fetch subcategory ids: %w", err)
+	}
+
+	index := make(ProductIndex, len(subcatIDs)*20)
+	for _, id := range subcatIDs {
+		products, err := c.fetchProductsInSubcategory(ctx, id)
+		if err != nil {
+			// Non-fatal: skip subcategory and continue.
+			continue
+		}
+		for _, p := range products {
+			if p.Thumbnail == "" {
+				continue
+			}
+			key := normalise(p.DisplayName)
+			if key != "" {
+				index[key] = p.Thumbnail
+			}
+		}
+	}
+	return index, nil
+}
+
+// fetchSubcategoryIDs returns the IDs of all published subcategories.
+func (c *MercadonaClient) fetchSubcategoryIDs(ctx context.Context) ([]int, error) {
+	url := fmt.Sprintf("%s/categories/?lang=%s", c.baseURL, mercadonaLang)
+	var resp categoriesResponse
+	if err := c.getJSON(ctx, url, &resp); err != nil {
+		return nil, err
+	}
+
+	var ids []int
+	for _, top := range resp.Results {
+		for _, sub := range top.Categories {
+			if sub.Published {
+				ids = append(ids, sub.ID)
+			}
+		}
+	}
+	return ids, nil
+}
+
+// fetchProductsInSubcategory returns all products for the given subcategory ID.
+func (c *MercadonaClient) fetchProductsInSubcategory(ctx context.Context, id int) ([]mercadonaProduct, error) {
+	url := fmt.Sprintf("%s/categories/%d/?lang=%s", c.baseURL, id, mercadonaLang)
+	var resp categoryDetailResponse
+	if err := c.getJSON(ctx, url, &resp); err != nil {
+		return nil, err
+	}
+	var products []mercadonaProduct
+	for _, sub := range resp.Categories {
+		products = append(products, sub.Products...)
+	}
+	return products, nil
+}
+
+// getJSON performs a GET request and decodes the JSON body into v.
+func (c *MercadonaClient) getJSON(ctx context.Context, url string, v any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("new request %s: %w", url, err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("get %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("get %s: unexpected status %d", url, resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+		return fmt.Errorf("decode %s: %w", url, err)
+	}
+	return nil
+}
+
+// normalise converts a product name to a lowercase, ASCII-only, whitespace-
+// collapsed string used as a lookup key in ProductIndex.
+// Accented characters are mapped to their base ASCII equivalent where possible.
+// Non-letter, non-digit characters (including punctuation and apostrophes) act
+// as word separators so that e.g. "d'Embolicar" → "d embolicar".
+func normalise(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	prevSpace := true // treat start-of-string as a boundary
+
+	for _, r := range s {
+		// Map accented → base ASCII first.
+		r = deaccent(r)
+
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToLower(r))
+			prevSpace = false
+		} else {
+			// Spaces, punctuation, apostrophes, etc. all become a single space separator.
+			if !prevSpace {
+				b.WriteByte(' ')
+				prevSpace = true
+			}
+		}
+	}
+
+	return strings.TrimRight(b.String(), " ")
+}
+
+// deaccent maps accented characters commonly found in Spanish/Catalan product
+// names to their unaccented ASCII equivalents.
+func deaccent(r rune) rune {
+	switch r {
+	case 'à', 'á', 'â', 'ã', 'ä', 'å', 'À', 'Á', 'Â', 'Ã', 'Ä', 'Å':
+		return 'a'
+	case 'è', 'é', 'ê', 'ë', 'È', 'É', 'Ê', 'Ë':
+		return 'e'
+	case 'ì', 'í', 'î', 'ï', 'Ì', 'Í', 'Î', 'Ï':
+		return 'i'
+	case 'ò', 'ó', 'ô', 'õ', 'ö', 'Ò', 'Ó', 'Ô', 'Õ', 'Ö':
+		return 'o'
+	case 'ù', 'ú', 'û', 'ü', 'Ù', 'Ú', 'Û', 'Ü':
+		return 'u'
+	case 'ñ', 'Ñ':
+		return 'n'
+	case 'ç', 'Ç':
+		return 'c'
+	case 'ł', 'Ł':
+		return 'l'
+	default:
+		return r
+	}
+}

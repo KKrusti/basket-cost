@@ -15,6 +15,7 @@ type Product struct {
 	ID           string        `json:"id"`
 	Name         string        `json:"name"`
 	Category     string        `json:"category,omitempty"`
+	ImageURL     string        `json:"imageUrl,omitempty"`
 	CurrentPrice float64       `json:"currentPrice"`
 	PriceHistory []PriceRecord `json:"priceHistory"`
 }
@@ -24,6 +25,7 @@ type SearchResult struct {
 	ID           string  `json:"id"`
 	Name         string  `json:"name"`
 	Category     string  `json:"category,omitempty"`
+	ImageURL     string  `json:"imageUrl,omitempty"`
 	CurrentPrice float64 `json:"currentPrice"`
 	MinPrice     float64 `json:"minPrice"`
 	MaxPrice     float64 `json:"maxPrice"`
