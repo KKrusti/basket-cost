@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchProducts, getAllProducts, getProduct } from './products';
+import { searchProducts, getAllProducts, getProduct, uploadTicket, uploadTickets } from './products';
 import type { SearchResult, Product } from '../types';
 
 const mockSearchResults: SearchResult[] = [
@@ -124,5 +124,107 @@ describe('getProduct', () => {
     }));
 
     await expect(getProduct('9999')).rejects.toThrow('Product not found: Not Found');
+  });
+});
+
+describe('uploadTicket', () => {
+  it('returns the result when the response is OK', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ invoiceNumber: '1234', linesImported: 5 }),
+    }));
+
+    const file = new File(['%PDF'], 'ticket.pdf', { type: 'application/pdf' });
+    const result = await uploadTicket(file);
+    expect(result).toEqual({ invoiceNumber: '1234', linesImported: 5 });
+  });
+
+  it('calls POST /api/tickets with multipart form data', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ invoiceNumber: 'X', linesImported: 1 }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const file = new File(['%PDF'], 'ticket.pdf', { type: 'application/pdf' });
+    await uploadTicket(file);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tickets',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    );
+  });
+
+  it('throws an Error with the response text when the upload fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      statusText: 'Unprocessable Entity',
+      text: () => Promise.resolve('Formato no válido'),
+    }));
+
+    const file = new File(['bad'], 'ticket.pdf', { type: 'application/pdf' });
+    await expect(uploadTicket(file)).rejects.toThrow('Formato no válido');
+  });
+});
+
+describe('uploadTickets', () => {
+  it('returns a summary with all items succeeded', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ invoiceNumber: 'A1', linesImported: 3 }),
+    }));
+
+    const files = [
+      new File(['%PDF'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['%PDF'], 'b.pdf', { type: 'application/pdf' }),
+    ];
+    const summary = await uploadTickets(files);
+    expect(summary.total).toBe(2);
+    expect(summary.succeeded).toBe(2);
+    expect(summary.failed).toBe(0);
+    expect(summary.items.every((i) => i.ok)).toBe(true);
+  });
+
+  it('captures individual failures without aborting the batch', async () => {
+    let callCount = 0;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ invoiceNumber: 'OK', linesImported: 2 }),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        statusText: 'Error',
+        text: () => Promise.resolve('Fallo al procesar'),
+      });
+    }));
+
+    const files = [
+      new File(['%PDF'], 'ok.pdf', { type: 'application/pdf' }),
+      new File(['bad'], 'fail.pdf', { type: 'application/pdf' }),
+    ];
+    const summary = await uploadTickets(files);
+    expect(summary.total).toBe(2);
+    expect(summary.succeeded).toBe(1);
+    expect(summary.failed).toBe(1);
+
+    const okItem = summary.items.find((i) => i.file === 'ok.pdf');
+    const failItem = summary.items.find((i) => i.file === 'fail.pdf');
+    expect(okItem?.ok).toBe(true);
+    expect(failItem?.ok).toBe(false);
+    if (failItem && !failItem.ok) {
+      expect(failItem.error).toBe('Fallo al procesar');
+    }
+  });
+
+  it('returns empty summary for empty file array', async () => {
+    const summary = await uploadTickets([]);
+    expect(summary.total).toBe(0);
+    expect(summary.succeeded).toBe(0);
+    expect(summary.failed).toBe(0);
+    expect(summary.items).toHaveLength(0);
   });
 });

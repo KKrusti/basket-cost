@@ -25,3 +25,14 @@ export interface TicketUploadResult {
   invoiceNumber: string;
   linesImported: number;
 }
+
+export type TicketUploadItem =
+  | { file: string; ok: true; result: TicketUploadResult }
+  | { file: string; ok: false; error: string };
+
+export interface TicketUploadSummary {
+  total: number;
+  succeeded: number;
+  failed: number;
+  items: TicketUploadItem[];
+}

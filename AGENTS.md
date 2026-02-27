@@ -22,7 +22,7 @@ Always communicate with the user in **Spanish**, regardless of the language used
 
 Two-tier SPA for tracking grocery prices in the Spanish market.
 
-- **Backend:** Go 1.21, pure stdlib, no external dependencies. JSON REST API on `:8080`.
+- **Backend:** Go 1.24, SQLite via `modernc.org/sqlite` (CGO-free), PDF parsing via `ledongthuc/pdf`. JSON REST API on `:8080`.
 - **Frontend:** React 18 + TypeScript + Vite, on `:5173`. Proxies `/api` to the backend.
 - **Task runner:** `task` (go-task). Use `Taskfile.yml` at the repo root.
 
@@ -83,28 +83,105 @@ cd frontend && npm run test:coverage # coverage report
 basket-cost/
 ├── Taskfile.yml
 ├── backend/
-│   ├── go.mod                        # module: basket-cost, go 1.21, no external deps
-│   ├── cmd/server/main.go            # entry point: routing, CORS middleware, ListenAndServe
+│   ├── go.mod                        # module: basket-cost, go 1.24, modernc.org/sqlite + ledongthuc/pdf
+│   ├── basket-cost.db                # SQLite database (created on first run)
+│   ├── seed/                         # sample Mercadona PDF receipts for seeding
+│   ├── cmd/
+│   │   ├── server/main.go            # entry point: routing, CORS middleware, ListenAndServe
+│   │   ├── seed/main.go              # CLI: bulk-import PDF receipts into the DB
+│   │   └── enrich/main.go            # CLI: download product images from the Mercadona API
 │   └── internal/
+│       ├── database/db.go            # SQLite connection, WAL pragmas, schema migrations
+│       ├── models/models.go          # domain types: Product, PriceRecord, SearchResult
+│       ├── store/
+│       │   ├── store.go              # Store interface + SQLiteStore implementation
+│       │   └── store_test.go
 │       ├── handlers/
-│       │   ├── handlers.go           # HTTP handlers
-│       │   └── handlers_test.go      # handler tests
-│       ├── models/models.go          # domain types (pure structs)
-│       └── mockdata/
-│           ├── data.go               # in-memory data + query/lookup logic
-│           └── data_test.go          # mockdata tests
+│       │   ├── handlers.go           # HTTP handlers: Search, Product, Ticket
+│       │   └── handlers_test.go
+│       ├── enricher/
+│       │   ├── enricher.go           # orchestrates image-URL enrichment
+│       │   ├── mercadona_client.go   # HTTP client for the public Mercadona catalogue API
+│       │   └── enricher_test.go
+│       └── ticket/
+│           ├── model.go              # Ticket and TicketLine types
+│           ├── extractor.go          # PDFExtractor interface + ledongthuc implementation
+│           ├── parser.go             # MercadonaParser: PDF text → Ticket struct
+│           ├── importer.go           # Importer: extract → parse → store.UpsertPriceRecord
+│           ├── parser_test.go
+│           └── importer_test.go
 └── frontend/
-    ├── vite.config.ts
-    ├── tsconfig.json
+    ├── vite.config.ts                # Vite + proxy /api→:8080, manual chunks, Vitest config
+    ├── tsconfig.json                 # strict mode, noUnusedLocals, noUnusedParameters
+    ├── package.json
     └── src/
-        ├── main.tsx / App.tsx
+        ├── main.tsx                  # ReactDOM.createRoot entry point
+        ├── App.tsx                   # app shell: header with TicketUploader + SearchBar/ProductDetail
         ├── App.test.tsx
+        ├── index.css                 # design system: CSS variables, all component styles
         ├── test/setup.ts             # Vitest global setup (@testing-library/jest-dom)
+        ├── types/index.ts            # shared TypeScript interfaces
         ├── api/
-        │   ├── products.ts           # fetch-based API client
+        │   ├── products.ts           # fetch-based API client (search, getProduct, uploadTicket, uploadTickets)
         │   └── products.test.ts
-        ├── components/               # React components (each with a co-located *.test.tsx)
-        └── types/index.ts            # shared TypeScript interfaces
+        ├── components/
+        │   ├── SearchBar.tsx         # search input with 300 ms debounce + result list
+        │   ├── SearchBar.test.tsx
+        │   ├── ProductBrowser.tsx    # full catalogue grid with page-size and column-count controls
+        │   ├── ProductBrowser.test.tsx
+        │   ├── ProductDetail.tsx     # product detail: Recharts line chart + price history table
+        │   ├── ProductDetail.test.tsx
+        │   ├── ProductImage.tsx      # product image with emoji fallback
+        │   ├── ProductImage.test.tsx
+        │   ├── TicketUploader.tsx    # PDF upload button (single or batch), uploading state, result toast
+        │   └── TicketUploader.test.tsx
+        └── utils/
+            ├── productImages.ts      # static product-ID → image URL map + category emoji fallbacks
+            └── productImages.test.ts
+```
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/products?q=<query>` | Search products; empty `q` returns all |
+| `GET` | `/api/products/<id>` | Full product detail with price history |
+| `POST` | `/api/tickets` | Upload a single Mercadona PDF receipt (`multipart/form-data`, field `file`) |
+
+### POST /api/tickets — request / response
+
+**Request:** `multipart/form-data` with a single field named `file` containing a PDF (max 10 MB).
+
+**Response 201:**
+```json
+{ "invoiceNumber": "4144-017-284404", "linesImported": 23 }
+```
+
+**Error responses:** `400` (missing field or bad form), `422` (PDF cannot be parsed), `500` (internal error).
+
+---
+
+## Frontend API Client (`src/api/products.ts`)
+
+| Function | Description |
+|----------|-------------|
+| `searchProducts(query)` | `GET /api/products?q=<query>` |
+| `getAllProducts()` | alias for `searchProducts('')` |
+| `getProduct(id)` | `GET /api/products/<id>` |
+| `uploadTicket(file)` | `POST /api/tickets` — single PDF |
+| `uploadTickets(files)` | Runs `uploadTicket` for every file concurrently via `Promise.all`. Individual failures are captured; the batch never aborts. Returns a `TicketUploadSummary`. |
+
+### TicketUploadSummary shape
+
+```ts
+interface TicketUploadSummary {
+  total: number;
+  succeeded: number;
+  failed: number;
+  items: TicketUploadItem[];   // discriminated union: ok/error per file
+}
 ```
 
 ---
@@ -133,13 +210,15 @@ cd frontend && npm test
 - Follow strict `cmd/` + `internal/` layout. Never place business logic in `cmd/`.
 - `cmd/server/main.go` is wiring only: routing, middleware, `http.ListenAndServe`.
 - `internal/models` contains pure data structs — no logic, no methods.
-- `internal/mockdata` acts as the data/repository layer for now.
+- `internal/store` is the data/repository layer (`Store` interface + `SQLiteStore` implementation).
 - `internal/handlers` is the HTTP layer only — delegate logic to other packages.
+- `internal/ticket` owns the full PDF import pipeline: extract → parse → persist.
+- `internal/enricher` handles product image enrichment from the Mercadona public API.
 
 ### Naming
 
 - Exported identifiers: `PascalCase`. Unexported: `camelCase`.
-- Package names: lowercase single words (`handlers`, `models`, `mockdata`).
+- Package names: lowercase single words (`handlers`, `models`, `store`, `ticket`, `enricher`).
 - Acronyms follow Go convention: `GetProductByID`, not `GetProductById`.
 - No Hungarian notation or type suffixes on variables.
 
@@ -169,12 +248,20 @@ if r.Method != http.MethodGet {
 
 - Always set `Content-Type: application/json` before writing the body.
 - Use `json.NewEncoder(w).Encode(v)` for JSON responses (idiomatic, streams output).
-- CORS is handled by a hand-rolled middleware — do not add external CORS libraries.
+- CORS is handled by a hand-rolled middleware in `cmd/server/main.go` — do not add external CORS libraries.
 
 ### Struct Tags
 
 - All exported struct fields must have `json:"..."` tags.
 - Use `omitempty` on optional/nullable fields.
+
+### Database
+
+- Driver: `modernc.org/sqlite` (CGO-free, pure Go).
+- `SetMaxOpenConns(1)` to avoid WAL write contention.
+- PRAGMAs set at open time: `foreign_keys=ON`, `journal_mode=WAL`, `synchronous=NORMAL`, `cache_size=-16000`.
+- Schema changes go through the migration table in `internal/database/db.go` — never ALTER TABLE outside a migration.
+- Product IDs are derived slugs (`slugify(name)`) generated in `store.UpsertPriceRecord`; do not generate IDs in handlers.
 
 ---
 
@@ -185,7 +272,8 @@ if r.Method != http.MethodGet {
 - Function components only — no class components.
 - Export pattern: `export default function ComponentName(props: ComponentNameProps)`.
 - Define props with a local `interface ComponentNameProps { ... }` in the same file.
-- Shared domain types live in `src/types/index.ts` as `interface` (not `type` aliases).
+- Shared domain types live in `src/types/index.ts` as `interface` (not `type` aliases), except for discriminated unions which use `type`.
+- SVG icons are defined as small inline function components within the same file — do not use emoji as UI icons.
 
 ### Imports
 
@@ -215,6 +303,7 @@ useEffect(() => {
 ```
 
 - Debounce via `setTimeout`/`clearTimeout` inside `useEffect` — no external debounce library.
+- For concurrent independent requests (e.g. batch uploads), use `Promise.all` — do not chain sequentially.
 
 ### State Management
 

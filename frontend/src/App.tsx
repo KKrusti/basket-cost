@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import SearchBar from './components/SearchBar';
 import ProductDetail from './components/ProductDetail';
+import TicketUploader from './components/TicketUploader';
 
 function BasketIcon() {
   return (
@@ -34,6 +35,9 @@ export default function App() {
         <p className="app-header__subtitle">
           Consulta y compara el historial de precios de tus productos favoritos
         </p>
+        <div className="app-header__actions">
+          <TicketUploader />
+        </div>
       </header>
 
       <div className="app-content">

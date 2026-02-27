@@ -1,4 +1,4 @@
-import type { SearchResult, Product, TicketUploadResult } from '../types';
+import type { SearchResult, Product, TicketUploadResult, TicketUploadSummary } from '../types';
 
 const API_BASE = '/api';
 
@@ -31,4 +31,30 @@ export async function uploadTicket(file: File): Promise<TicketUploadResult> {
     throw new Error(text || res.statusText);
   }
   return res.json();
+}
+
+/**
+ * Uploads multiple PDF ticket files concurrently.
+ * Each file is processed independently; individual failures are captured
+ * as error strings in the result summary instead of aborting the batch.
+ */
+export async function uploadTickets(files: File[]): Promise<TicketUploadSummary> {
+  const results = await Promise.all(
+    files.map(async (file) => {
+      try {
+        const result = await uploadTicket(file);
+        return { file: file.name, ok: true as const, result };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { file: file.name, ok: false as const, error: message };
+      }
+    }),
+  );
+
+  return {
+    total: results.length,
+    succeeded: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    items: results,
+  };
 }
