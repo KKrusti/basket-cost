@@ -63,27 +63,37 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
 
   const categories = Object.keys(byCategory).sort();
 
+  // Flatten into a single ordered list: [category header, product, product, ...]
+  const items: Array<{ type: 'header'; label: string } | { type: 'product'; product: SearchResult }> = [];
+  for (const category of categories) {
+    items.push({ type: 'header', label: category });
+    for (const product of byCategory[category]) {
+      items.push({ type: 'product', product });
+    }
+  }
+
   return (
     <div className="product-browser">
       <p className="product-browser__intro">Explorar catálogo</p>
-      {categories.map((category) => (
-        <div key={category} className="browser-category">
-          <h3 className="browser-category-title">{category}</h3>
-          <div className="browser-product-grid">
-            {byCategory[category].map((product) => (
-              <button
-                key={product.id}
-                className="browser-product-btn"
-                onClick={() => onSelectProduct(product.id)}
-                aria-label={product.name}
-              >
-                <ProductImage productId={product.id} category={product.category} size="sm" />
-                <span className="browser-product-name">{product.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      ))}
+      <div className="browser-flow">
+        {items.map((item) =>
+          item.type === 'header' ? (
+            <div key={`cat-${item.label}`} className="browser-category-label">
+              {item.label}
+            </div>
+          ) : (
+            <button
+              key={item.product.id}
+              className="browser-product-btn"
+              onClick={() => onSelectProduct(item.product.id)}
+              aria-label={item.product.name}
+            >
+              <ProductImage productId={item.product.id} category={item.product.category} size="sm" />
+              <span className="browser-product-name">{item.product.name}</span>
+            </button>
+          )
+        )}
+      </div>
     </div>
   );
 }
