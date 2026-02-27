@@ -12,8 +12,9 @@ Always communicate with the user in **Spanish**, regardless of the language used
 
 ## Skills
 
-- Before modifying any **frontend** code, load the `vercel-react-best-practices` skill.
 - Before modifying any **backend** code, load the `golang-pro` skill.
+- Before modifying any **frontend** code, load **both** the `vercel-react-best-practices` skill and the `ui-ux-pro-max` skill. These two skills are complementary and must always be used together for frontend/UI work: `vercel-react-best-practices` governs React/Next.js performance patterns, while `ui-ux-pro-max` governs visual design, component styling, and UX decisions.
+- Every time a skill is loaded, announce it in the response with the tag `[skill: <name>]` before writing any code.
 
 ---
 
@@ -112,7 +113,7 @@ basket-cost/
 
 **Tests are mandatory.** Every new piece of code — backend or frontend — must have corresponding unit tests written alongside it. This is non-negotiable.
 
-- **Backend (Go):** new functions in `mockdata` or `handlers` require a `_test.go` file in the same package. Use `net/http/httptest` for handler tests.
+- **Backend (Go):** new functions in `store` or `handlers` require a `_test.go` file in the same package. Use `net/http/httptest` for handler tests.
 - **Frontend (TypeScript/React):** every new component must have a co-located `*.test.tsx` file; every new API function must have a corresponding test in `*.test.ts`. Use Vitest + `@testing-library/react`.
 - Third-party libraries that do not render in jsdom (e.g. `recharts`) must be mocked with `vi.mock(...)`.
 - When querying DOM elements, prefer semantic queries (`getByRole`, `getByLabelText`). Fall back to `document.querySelector` with a CSS class selector only when the same text appears in multiple nodes.
