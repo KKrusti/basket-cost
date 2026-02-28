@@ -6,6 +6,7 @@ import (
 	"basket-cost/internal/handlers"
 	"basket-cost/internal/store"
 	"basket-cost/internal/ticket"
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -37,6 +38,7 @@ func main() {
 	s := store.New(db)
 	imp := ticket.NewImporter(ticket.NewExtractor(), ticket.NewMercadonaParser(), s)
 	enr := enricher.New(s)
+	enr.Start(context.Background())
 	h := handlers.New(s, imp, enr)
 	mux := http.NewServeMux()
 

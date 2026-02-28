@@ -5,7 +5,7 @@ interface ProductImageProps {
   productId: string;
   imageUrl?: string;
   category: string | undefined;
-  size?: 'sm' | 'md';
+  size?: 'sm' | 'md' | 'lg';
 }
 
 export default function ProductImage({ productId, imageUrl, category, size = 'md' }: ProductImageProps) {
@@ -14,7 +14,7 @@ export default function ProductImage({ productId, imageUrl, category, size = 'md
   const [imgFailed, setImgFailed] = useState(false);
 
   const showEmoji = !url || imgFailed;
-  const sizeClass = size === 'sm' ? 'product-img-sm' : 'product-img-md';
+  const sizeClass = size === 'sm' ? 'product-img-sm' : size === 'lg' ? 'product-img-lg' : 'product-img-md';
 
   if (showEmoji) {
     return (

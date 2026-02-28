@@ -543,3 +543,69 @@ func TestUpsertPriceRecordBatch_PriceAndDatePreserved(t *testing.T) {
 		t.Errorf("Store: want %q, got %q", want.Store, got.Store)
 	}
 }
+
+// ---------- GetProductsWithoutImage ----------
+
+func TestGetProductsWithoutImage_ReturnsOnlyUnimaged(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert two products via UpsertPriceRecord; neither has an image yet.
+	rec := models.PriceRecord{Date: date(2025, 1, 1), Price: 1.00, Store: "Mercadona"}
+	if err := s.UpsertPriceRecord("LECHE ENTERA", rec); err != nil {
+		t.Fatalf("upsert leche: %v", err)
+	}
+	if err := s.UpsertPriceRecord("PAN MOLDE", rec); err != nil {
+		t.Fatalf("upsert pan: %v", err)
+	}
+
+	// Give one of them an image.
+	if err := s.UpdateProductImageURL("leche-entera", "https://img/leche.jpg"); err != nil {
+		t.Fatalf("update image: %v", err)
+	}
+
+	got, err := s.GetProductsWithoutImage()
+	if err != nil {
+		t.Fatalf("GetProductsWithoutImage: %v", err)
+	}
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 product without image, got %d", len(got))
+	}
+	if got[0].ID != "pan-molde" {
+		t.Errorf("expected pan-molde, got %q", got[0].ID)
+	}
+	if got[0].Name != "PAN MOLDE" {
+		t.Errorf("expected name PAN MOLDE, got %q", got[0].Name)
+	}
+}
+
+func TestGetProductsWithoutImage_EmptyWhenAllHaveImage(t *testing.T) {
+	s := newTestStore(t)
+
+	rec := models.PriceRecord{Date: date(2025, 1, 1), Price: 1.00, Store: "Mercadona"}
+	if err := s.UpsertPriceRecord("LECHE ENTERA", rec); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := s.UpdateProductImageURL("leche-entera", "https://img/leche.jpg"); err != nil {
+		t.Fatalf("update image: %v", err)
+	}
+
+	got, err := s.GetProductsWithoutImage()
+	if err != nil {
+		t.Fatalf("GetProductsWithoutImage: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty slice, got %d products", len(got))
+	}
+}
+
+func TestGetProductsWithoutImage_EmptyStore(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetProductsWithoutImage()
+	if err != nil {
+		t.Fatalf("GetProductsWithoutImage: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty slice on empty store, got %d", len(got))
+	}
+}

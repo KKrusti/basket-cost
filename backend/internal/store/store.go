@@ -26,6 +26,10 @@ type Store interface {
 	UpsertPriceRecordBatch(entries []models.PriceRecordEntry) error
 	// UpdateProductImageURL sets the image URL for the product with the given ID.
 	UpdateProductImageURL(id, imageURL string) error
+	// GetProductsWithoutImage returns a lightweight list of products that have
+	// no image URL set yet.  Used by the enricher to avoid re-processing
+	// products that already have an image.
+	GetProductsWithoutImage() ([]models.SearchResult, error)
 	// IsFileProcessed returns true when filename has already been imported.
 	IsFileProcessed(filename string) (bool, error)
 	// MarkFileProcessed records filename as successfully imported at the given time.
@@ -272,6 +276,34 @@ func (s *SQLiteStore) UpdateProductImageURL(id, imageURL string) error {
 		return fmt.Errorf("update image_url for product %s: %w", id, err)
 	}
 	return nil
+}
+
+// GetProductsWithoutImage returns a minimal projection of every product whose
+// image_url column is NULL or empty.  Only the ID and Name fields are populated.
+func (s *SQLiteStore) GetProductsWithoutImage() ([]models.SearchResult, error) {
+	rows, err := s.db.Query(
+		`SELECT id, name FROM products WHERE image_url IS NULL OR image_url = '' ORDER BY name`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get products without image: %w", err)
+	}
+	defer rows.Close()
+
+	var results []models.SearchResult
+	for rows.Next() {
+		var r models.SearchResult
+		if err := rows.Scan(&r.ID, &r.Name); err != nil {
+			return nil, fmt.Errorf("scan product without image: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate products without image: %w", err)
+	}
+	if results == nil {
+		results = []models.SearchResult{}
+	}
+	return results, nil
 }
 
 // IsFileProcessed returns true when filename has already been registered in the

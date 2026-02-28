@@ -3,21 +3,17 @@ import SearchBar from './components/SearchBar';
 import ProductDetail from './components/ProductDetail';
 import TicketUploader from './components/TicketUploader';
 
-function BasketIcon() {
+function AppLogo() {
   return (
     <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      style={{ color: 'var(--color-primary)' }}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 400 100"
+      aria-label="Mercaflación"
+      role="img"
+      className="app-header__logo-svg"
     >
-      <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <path d="M16 10a4 4 0 0 1-8 0" />
+      <rect x="50" y="10" width="300" height="80" rx="40" ry="40" fill="#00A859" stroke="#FFFFFF" strokeWidth="4"/>
+      <text x="200" y="60" fontFamily="Arial, sans-serif" fontSize="32" fontWeight="bold" fill="#FFFFFF" textAnchor="middle" letterSpacing="1">MERCAFLACION</text>
     </svg>
   );
 }
@@ -29,8 +25,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="app-header__logo">
-          <BasketIcon />
-          <h1 className="app-header__title">Basket Cost</h1>
+          <AppLogo />
         </div>
         <p className="app-header__subtitle">
           Consulta y compara el historial de precios de tus productos favoritos

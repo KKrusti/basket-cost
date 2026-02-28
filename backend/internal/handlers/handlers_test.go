@@ -2,7 +2,6 @@ package handlers_test
 
 import (
 	"bytes"
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"basket-cost/internal/database"
-	"basket-cost/internal/enricher"
 	"basket-cost/internal/handlers"
 	"basket-cost/internal/models"
 	"basket-cost/internal/store"
@@ -376,19 +374,17 @@ func mustOpenMemDB(t *testing.T) *sql.DB {
 
 // --- fakeEnricher ---
 
-// fakeEnricher implements handlers.EnrichRunner without touching the network.
+// fakeEnricher implements handlers.EnrichScheduler without touching the network.
 type fakeEnricher struct {
 	called chan struct{}
-	err    error
 }
 
 func newFakeEnricher() *fakeEnricher {
 	return &fakeEnricher{called: make(chan struct{}, 1)}
 }
 
-func (f *fakeEnricher) Run(_ context.Context) (enricher.EnrichResult, error) {
+func (f *fakeEnricher) Schedule() {
 	f.called <- struct{}{}
-	return enricher.EnrichResult{Total: 1, Updated: 1}, f.err
 }
 
 // --- enricher integration test ---
@@ -413,12 +409,13 @@ func TestTicketHandler_EnricherCalledAfterImport(t *testing.T) {
 		t.Fatalf("expected 201, got %d", w.Code)
 	}
 
-	// Wait for the background goroutine to call the enricher (generous timeout).
+	// Schedule() is called synchronously inside TicketHandler, so the signal
+	// must already be in the channel by the time the handler returns.
 	select {
 	case <-enr.called:
 		// OK
-	case <-time.After(2 * time.Second):
-		t.Fatal("enricher.Run was not called within 2 seconds")
+	default:
+		t.Fatal("enricher.Schedule was not called")
 	}
 }
 

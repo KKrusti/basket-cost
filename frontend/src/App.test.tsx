@@ -35,9 +35,9 @@ beforeEach(() => {
 });
 
 describe('App', () => {
-  it('renders the application title', () => {
+  it('renders the application logo', () => {
     render(<App />);
-    expect(screen.getByText('Basket Cost')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /mercaflación/i })).toBeInTheDocument();
   });
 
   it('shows SearchBar by default', () => {

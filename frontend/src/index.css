@@ -110,23 +110,14 @@ body {
 .app-header__logo {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
-}
-
-.app-header__logo svg {
-  width: 22px;
-  height: 22px;
   flex-shrink: 0;
 }
 
-.app-header__title {
-  font-family: 'Rubik', sans-serif;
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: var(--color-primary-dark);
-  letter-spacing: -0.01em;
-  line-height: 1;
-  white-space: nowrap;
+.app-header__logo-svg {
+  /* viewBox 400×100 → ratio 4:1; altura fija de 36px */
+  height: 36px;
+  width: 144px;
+  flex-shrink: 0;
 }
 
 .app-header__subtitle {

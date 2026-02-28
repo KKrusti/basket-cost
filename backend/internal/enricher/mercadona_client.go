@@ -17,6 +17,12 @@ const (
 	mercadonaBaseURL   = "https://tienda.mercadona.es/api"
 	mercadonaLang      = "es"
 	defaultHTTPTimeout = 15 * time.Second
+
+	// subcategoryDelay is the minimum time between consecutive subcategory
+	// requests. Mercadona's WAF rate-limits aggressively: bursts of requests
+	// trigger a 403 that blocks the IP for ~2 minutes. 2 s gives a comfortable
+	// margin (tested empirically; 0.5 s already causes intermittent blocks).
+	subcategoryDelay = 2 * time.Second
 )
 
 // stopWords are tokens excluded from keyword matching because they appear in
@@ -107,14 +113,28 @@ type ProductIndex []ProductEntry
 // BuildProductIndex downloads all published subcategories from Mercadona,
 // collects every product's display_name and thumbnail, and returns an index
 // ready for keyword-based matching.
+//
+// Requests to subcategory endpoints are throttled to one every subcategoryDelay
+// to avoid triggering Mercadona's WAF rate-limiter, which blocks the IP for
+// ~2 minutes on bursts. The first categories request is unthrottled.
 func (c *MercadonaClient) BuildProductIndex(ctx context.Context) (ProductIndex, error) {
 	subcatIDs, err := c.fetchSubcategoryIDs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch subcategory ids: %w", err)
 	}
 
+	ticker := time.NewTicker(subcategoryDelay)
+	defer ticker.Stop()
+
 	var index ProductIndex
 	for _, id := range subcatIDs {
+		// Wait for the next tick before each subcategory request.
+		select {
+		case <-ctx.Done():
+			return index, ctx.Err()
+		case <-ticker.C:
+		}
+
 		products, err := c.fetchProductsInSubcategory(ctx, id)
 		if err != nil {
 			// Non-fatal: log and skip subcategory.
@@ -172,11 +192,16 @@ func (c *MercadonaClient) fetchProductsInSubcategory(ctx context.Context, id int
 }
 
 // getJSON performs a GET request and decodes the JSON body into v.
+// Browser-like headers are set to avoid 403 responses from Mercadona's WAF.
 func (c *MercadonaClient) getJSON(ctx context.Context, url string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("new request %s: %w", url, err)
 	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "es-ES,es;q=0.9")
+	req.Header.Set("Referer", "https://tienda.mercadona.es/")
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("get %s: %w", url, err)

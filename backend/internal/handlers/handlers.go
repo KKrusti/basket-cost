@@ -2,11 +2,9 @@
 package handlers
 
 import (
-	"basket-cost/internal/enricher"
 	"basket-cost/internal/store"
 	"basket-cost/internal/ticket"
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -14,22 +12,24 @@ import (
 	"time"
 )
 
-// EnrichRunner is the subset of *enricher.Enricher consumed by Handlers.
+// EnrichScheduler is the subset of *enricher.Enricher consumed by Handlers.
 // Declaring it as an interface allows tests to inject a fake without network calls.
-type EnrichRunner interface {
-	Run(ctx context.Context) (enricher.EnrichResult, error)
+// Schedule signals the background enrichment worker to run once; concurrent
+// calls are coalesced so the Mercadona API is not spammed.
+type EnrichScheduler interface {
+	Schedule()
 }
 
 // Handlers holds the shared dependencies injected at startup.
 type Handlers struct {
 	store    store.Store
 	importer *ticket.Importer
-	enricher EnrichRunner
+	enricher EnrichScheduler
 }
 
-// New returns a Handlers instance wired to the given Store, Importer and EnrichRunner.
+// New returns a Handlers instance wired to the given Store, Importer and EnrichScheduler.
 // enr may be nil, in which case automatic enrichment after ticket import is skipped.
-func New(s store.Store, imp *ticket.Importer, enr EnrichRunner) *Handlers {
+func New(s store.Store, imp *ticket.Importer, enr EnrichScheduler) *Handlers {
 	return &Handlers{store: s, importer: imp, enricher: enr}
 }
 
@@ -156,15 +156,9 @@ func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("handlers: encode ticket response: %v", err)
 	}
 
-	// Kick off enrichment in the background so the HTTP response is not delayed.
+	// Signal the background enricher worker. Concurrent signals are coalesced
+	// so a batch of ticket uploads triggers only one enrichment run.
 	if h.enricher != nil {
-		go func() {
-			res, err := h.enricher.Run(context.Background())
-			if err != nil {
-				log.Printf("enricher: background run failed: %v", err)
-				return
-			}
-			log.Printf("enricher: updated %d/%d products", res.Updated, res.Total)
-		}()
+		h.enricher.Schedule()
 	}
 }

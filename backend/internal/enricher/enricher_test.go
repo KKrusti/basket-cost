@@ -87,12 +87,14 @@ func TestKeywords_EmptyInput(t *testing.T) {
 
 // ---------- bestMatch ----------
 
+// Dice = 2·|A∩B| / (|A|+|B|).  minMatchScore = 0.5.
+
 func TestBestMatch_ExactMatch(t *testing.T) {
 	index := ProductIndex{
 		{Thumbnail: "https://example.com/leche.jpg", Keywords: []string{"leche", "entera"}},
 		{Thumbnail: "https://example.com/pan.jpg", Keywords: []string{"pan", "integral", "molde"}},
 	}
-	// "leche entera" → localKW = [leche, entera]; must match first entry at score 1.0.
+	// local=[leche,entera], entry=[leche,entera] → matched=2, Dice=2·2/(2+2)=1.0 ≥ 0.5 ✓
 	url, ok := bestMatch([]string{"leche", "entera"}, index)
 	if !ok {
 		t.Fatal("bestMatch: expected match, got none")
@@ -104,12 +106,12 @@ func TestBestMatch_ExactMatch(t *testing.T) {
 
 func TestBestMatch_PartialMatch_BelowThreshold(t *testing.T) {
 	index := ProductIndex{
+		// entry has 4 keywords; local has 2; only 1 shared → Dice = 2·1/(2+4) = 0.33 < 0.5
 		{Thumbnail: "https://example.com/aceite.jpg", Keywords: []string{"aceite", "oliva", "virgen", "extra"}},
 	}
-	// "aceite girasol" → only "aceite" matches (1/2 = 0.5 < minMatchScore 1.0)
 	_, ok := bestMatch([]string{"aceite", "girasol"}, index)
 	if ok {
-		t.Error("bestMatch: expected no match for partial overlap, got one")
+		t.Error("bestMatch: expected no match for low Dice score, got one")
 	}
 }
 
@@ -124,8 +126,6 @@ func TestBestMatch_EmptyLocalKeywords(t *testing.T) {
 	index := ProductIndex{
 		{Thumbnail: "https://example.com/leche.jpg", Keywords: []string{"leche"}},
 	}
-	// Division by zero guard: len(localKW) == 0 → score always 0/0.
-	// bestMatch should handle this gracefully (score = 0, no match).
 	_, ok := bestMatch([]string{}, index)
 	if ok {
 		t.Error("bestMatch: expected no match for empty local keywords, got one")
@@ -134,15 +134,118 @@ func TestBestMatch_EmptyLocalKeywords(t *testing.T) {
 
 func TestBestMatch_PicksBestCandidate(t *testing.T) {
 	index := ProductIndex{
+		// local=[yogur,natural], entry1=[yogur,natural] → Dice=2·2/(2+2)=1.0
 		{Thumbnail: "https://example.com/yogur-natural.jpg", Keywords: []string{"yogur", "natural"}},
+		// local=[yogur,natural], entry2=[yogur,coco] → matched=1, Dice=2·1/(2+2)=0.5
 		{Thumbnail: "https://example.com/yogur-coco.jpg", Keywords: []string{"yogur", "coco"}},
 	}
-	// Local: "yogur natural" → [yogur, natural]; first entry scores 1.0, second 0.5.
 	url, ok := bestMatch([]string{"yogur", "natural"}, index)
 	if !ok {
 		t.Fatal("bestMatch: expected match, got none")
 	}
 	if url != "https://example.com/yogur-natural.jpg" {
 		t.Errorf("bestMatch picked wrong candidate: %q", url)
+	}
+}
+
+// TestBestMatch_DiceRejectsFalsePositive verifies that the Dice metric prevents
+// a single shared keyword from matching a catalogue entry with many more keywords.
+// Concretely: local=["patata"] vs entry=["patatas","fritas","onduladas","pringles"]
+// Dice = 2·1/(1+4) = 0.4 < 0.5 → no match.
+func TestBestMatch_DiceRejectsFalsePositive(t *testing.T) {
+	index := ProductIndex{
+		{Thumbnail: "https://example.com/pringles.jpg", Keywords: []string{"patatas", "fritas", "onduladas", "pringles"}},
+	}
+	_, ok := bestMatch([]string{"patata"}, index)
+	if ok {
+		t.Error("bestMatch: Dice should reject 'patata' matching Pringles (4 extra keywords)")
+	}
+}
+
+// TestBestMatch_DiceAcceptsCloseMatch verifies a local product with few keywords
+// matches a catalogue entry with similar keywords.
+// local=["patata"] vs entry=["patata","hacendado"] → Dice=2·1/(1+2)=0.67 ≥ 0.5 ✓
+func TestBestMatch_DiceAcceptsCloseMatch(t *testing.T) {
+	index := ProductIndex{
+		{Thumbnail: "https://example.com/patata.jpg", Keywords: []string{"patata", "hacendado"}},
+		{Thumbnail: "https://example.com/pringles.jpg", Keywords: []string{"patatas", "fritas", "onduladas", "pringles"}},
+	}
+	url, ok := bestMatch([]string{"patata"}, index)
+	if !ok {
+		t.Fatal("bestMatch: expected match for patata vs patata-hacendado, got none")
+	}
+	if url != "https://example.com/patata.jpg" {
+		t.Errorf("bestMatch picked wrong candidate: %q", url)
+	}
+}
+
+// ---------- translateCatalan ----------
+
+func TestTranslateCatalan(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string // already normalised (output of normalise)
+		want  string
+	}{
+		{
+			name:  "leche semidesnatada sin lactosa",
+			input: "llet semi s llact",
+			// "s" is not in the dictionary (it's a stop word, filtered later by keywords())
+			// "llact" maps to "" so it is dropped; "s" is passed through unchanged
+			want: "leche semidesnatada s",
+		},
+		{
+			name:  "huevos de campo",
+			input: "12 ous pages",
+			want:  "12 huevos campo",
+		},
+		{
+			name:  "queso rallado 4 quesos",
+			input: "mescla 4 formatges",
+			want:  "mezcla 4 queso",
+		},
+		{
+			name:  "atun claro",
+			input: "tonyina clara natura",
+			want:  "atun clara natura",
+		},
+		{
+			name:  "champinon laminado",
+			input: "xampinyo net laminat",
+			want:  "champinon laminado",
+		},
+		{
+			name:  "salmon ahumado",
+			input: "salmo fumat",
+			want:  "salmon ahumado",
+		},
+		{
+			name:  "tortilla patata cebolla",
+			input: "truita patata ceba",
+			want:  "tortilla patata cebolla",
+		},
+		{
+			name:  "chapata",
+			input: "xapata vidre",
+			want:  "chapata",
+		},
+		{
+			name:  "non-catalan tokens are preserved",
+			input: "coca cola zero",
+			want:  "coca cola zero",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := translateCatalan(tt.input)
+			if got != tt.want {
+				t.Errorf("translateCatalan(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }

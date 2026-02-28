@@ -10,6 +10,7 @@ import {
 } from 'recharts';
 import type { Product } from '../types';
 import { getProduct } from '../api/products';
+import ProductImage from './ProductImage';
 
 interface ProductDetailProps {
   productId: string;
@@ -112,6 +113,12 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
       </button>
 
       <div className="detail-header">
+        <ProductImage
+          productId={product.id}
+          imageUrl={product.imageUrl}
+          category={product.category}
+          size="lg"
+        />
         <div className="detail-header__info">
           <h2>{product.name}</h2>
           {product.category && (
