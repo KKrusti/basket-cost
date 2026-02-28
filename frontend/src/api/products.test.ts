@@ -239,4 +239,44 @@ describe('uploadTickets', () => {
     expect(summary.failed).toBe(0);
     expect(summary.items).toHaveLength(0);
   });
+
+  it('calls onProgress after each file completes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ invoiceNumber: 'X', linesImported: 1 }),
+    }));
+
+    const files = [
+      new File(['%PDF'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['%PDF'], 'b.pdf', { type: 'application/pdf' }),
+      new File(['%PDF'], 'c.pdf', { type: 'application/pdf' }),
+    ];
+    const onProgress = vi.fn();
+    await uploadTickets(files, onProgress);
+
+    // Called once per file; total is always 3
+    expect(onProgress).toHaveBeenCalledTimes(3);
+    // Each call receives (done, 3) with done incrementing
+    const totals = onProgress.mock.calls.map(([, total]) => total);
+    expect(totals.every((t) => t === 3)).toBe(true);
+    const dones = onProgress.mock.calls.map(([done]) => done);
+    expect(dones).toContain(1);
+    expect(dones).toContain(2);
+    expect(dones).toContain(3);
+  });
+
+  it('calls onProgress even when a file fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      statusText: 'Error',
+      text: () => Promise.resolve('error'),
+    }));
+
+    const files = [new File(['bad'], 'fail.pdf', { type: 'application/pdf' })];
+    const onProgress = vi.fn();
+    await uploadTickets(files, onProgress);
+
+    expect(onProgress).toHaveBeenCalledTimes(1);
+    expect(onProgress).toHaveBeenCalledWith(1, 1);
+  });
 });

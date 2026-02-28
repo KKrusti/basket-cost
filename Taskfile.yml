@@ -57,3 +57,16 @@ tasks:
     dir: frontend
     cmds:
       - npm run dev
+
+  enrich:
+    desc: Descarga imágenes de productos desde la API de Mercadona y las guarda en la BD
+    dir: backend
+    cmds:
+      - go run ./cmd/enrich/main.go -db basket-cost.db
+
+  db:reset:
+    desc: "Borra todo el contenido de la base de datos (productos, precios e historial de tickets)"
+    dir: backend
+    prompt: "¿Seguro? Se borrarán TODOS los datos de basket-cost.db. Esta acción no se puede deshacer."
+    cmds:
+      - go run ./cmd/dbreset/main.go -db basket-cost.db

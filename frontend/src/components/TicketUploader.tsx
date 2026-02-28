@@ -94,10 +94,16 @@ function CloseIcon() {
 
 type UploadState = 'idle' | 'uploading' | 'done';
 
+interface UploadProgress {
+  done: number;
+  total: number;
+}
+
 export default function TicketUploader() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploadState, setUploadState] = useState<UploadState>('idle');
   const [summary, setSummary] = useState<TicketUploadSummary | null>(null);
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
 
   function handleButtonClick() {
     inputRef.current?.click();
@@ -112,11 +118,15 @@ export default function TicketUploader() {
 
     setUploadState('uploading');
     setSummary(null);
+    setProgress({ done: 0, total: files.length });
 
-    const result = await uploadTickets(files);
+    const result = await uploadTickets(files, (done, total) => {
+      setProgress({ done, total });
+    });
 
     setUploadState('done');
     setSummary(result);
+    setProgress(null);
   }
 
   function handleDismiss() {
@@ -125,6 +135,9 @@ export default function TicketUploader() {
   }
 
   const isUploading = uploadState === 'uploading';
+  const progressPct = progress && progress.total > 0
+    ? Math.round((progress.done / progress.total) * 100)
+    : 0;
 
   return (
     <div className="ticket-uploader">
@@ -153,6 +166,37 @@ export default function TicketUploader() {
           {isUploading ? 'Subiendo…' : 'Subir tickets'}
         </span>
       </button>
+
+      {/* Progress panel — shown while uploading */}
+      {isUploading && progress !== null && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label={`Procesando ticket ${progress.done} de ${progress.total}`}
+          className="ticket-uploader__progress"
+        >
+          <div className="ticket-uploader__progress-header">
+            <span className="ticket-uploader__progress-label">
+              {progress.total === 1
+                ? 'Procesando ticket…'
+                : `Procesando ${progress.done} de ${progress.total} tickets`}
+            </span>
+            <span className="ticket-uploader__progress-pct">{progressPct}%</span>
+          </div>
+          <div
+            className="ticket-uploader__progress-track"
+            role="progressbar"
+            aria-valuenow={progressPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div
+              className="ticket-uploader__progress-fill"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Result toast */}
       {uploadState === 'done' && summary !== null && (

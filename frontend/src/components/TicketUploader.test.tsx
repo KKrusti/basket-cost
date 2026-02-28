@@ -58,6 +58,53 @@ describe('TicketUploader', () => {
     expect(screen.getByRole('button', { name: /subiendo/i })).toBeDisabled();
   });
 
+  it('shows progress panel with correct label for a single file', async () => {
+    // Simulate progress callback by calling it before resolving
+    vi.mocked(productsApi.uploadTickets).mockImplementation(
+      async (_files, onProgress) => {
+        onProgress?.(0, 1);
+        return singleSuccess;
+      },
+    );
+
+    render(<TicketUploader />);
+    const input = screen.getByLabelText(/seleccionar tickets pdf/i);
+    const file = new File(['%PDF'], 'ticket.pdf', { type: 'application/pdf' });
+    await userEvent.upload(input, file);
+
+    // After upload completes the toast should be visible
+    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
+    expect(screen.getByText(/1 ticket importado/i)).toBeInTheDocument();
+  });
+
+  it('shows progress panel counting multiple files', async () => {
+    let capturedOnProgress: ((done: number, total: number) => void) | undefined;
+
+    // Hang indefinitely so we can inspect the in-progress state
+    vi.mocked(productsApi.uploadTickets).mockImplementation(
+      (_files, onProgress) => {
+        capturedOnProgress = onProgress;
+        return new Promise(() => {});
+      },
+    );
+
+    render(<TicketUploader />);
+    const input = screen.getByLabelText(/seleccionar tickets pdf/i);
+    const files = [
+      new File(['%PDF'], 'a.pdf', { type: 'application/pdf' }),
+      new File(['%PDF'], 'b.pdf', { type: 'application/pdf' }),
+      new File(['%PDF'], 'c.pdf', { type: 'application/pdf' }),
+    ];
+    await userEvent.upload(input, files);
+
+    // Simulate first file completing
+    capturedOnProgress?.(1, 3);
+
+    await waitFor(() =>
+      expect(screen.getByText(/procesando 1 de 3 tickets/i)).toBeInTheDocument(),
+    );
+  });
+
   it('shows success toast after single file upload', async () => {
     vi.mocked(productsApi.uploadTickets).mockResolvedValue(singleSuccess);
 
@@ -105,7 +152,10 @@ describe('TicketUploader', () => {
     await userEvent.upload(input, file);
 
     await waitFor(() =>
-      expect(productsApi.uploadTickets).toHaveBeenCalledWith([file]),
+      expect(productsApi.uploadTickets).toHaveBeenCalledWith(
+        [file],
+        expect.any(Function),
+      ),
     );
   });
 
