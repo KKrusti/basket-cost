@@ -20,8 +20,13 @@ type Ticket struct {
 type TicketLine struct {
 	// Name is the raw product name as it appears on the receipt (uppercase).
 	Name string
-	// UnitPrice is the price per unit or per kg, in euros.
+	// UnitPrice is the price per unit in euros, as charged on the receipt.
+	// For unit products (qty=1 or qty>1) this is the per-unit price.
+	// For weight products (sold by kg) this is the total line amount paid,
+	// because the meaningful comparison across purchases is the actual spend
+	// (the price/kg varies with weight and is not stored).
 	UnitPrice float64
 	// Quantity is the number of units purchased (always ≥ 1).
+	// For weight products this is always 1.
 	Quantity int
 }

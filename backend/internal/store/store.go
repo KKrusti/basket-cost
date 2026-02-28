@@ -21,6 +21,10 @@ type Store interface {
 	UpsertPriceRecord(name string, record models.PriceRecord) error
 	// UpdateProductImageURL sets the image URL for the product with the given ID.
 	UpdateProductImageURL(id, imageURL string) error
+	// IsFileProcessed returns true when filename has already been imported.
+	IsFileProcessed(filename string) (bool, error)
+	// MarkFileProcessed records filename as successfully imported at the given time.
+	MarkFileProcessed(filename string, importedAt time.Time) error
 }
 
 // SQLiteStore is the production Store backed by a *sql.DB.
@@ -224,6 +228,32 @@ func (s *SQLiteStore) UpdateProductImageURL(id, imageURL string) error {
 	)
 	if err != nil {
 		return fmt.Errorf("update image_url for product %s: %w", id, err)
+	}
+	return nil
+}
+
+// IsFileProcessed returns true when filename has already been registered in the
+// processed_files table, indicating it was successfully imported in a prior run.
+func (s *SQLiteStore) IsFileProcessed(filename string) (bool, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM processed_files WHERE filename = ?`, filename,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check processed file %q: %w", filename, err)
+	}
+	return count > 0, nil
+}
+
+// MarkFileProcessed records filename as successfully imported.
+// Calling it again for the same filename is idempotent (INSERT OR IGNORE).
+func (s *SQLiteStore) MarkFileProcessed(filename string, importedAt time.Time) error {
+	_, err := s.db.Exec(
+		`INSERT OR IGNORE INTO processed_files (filename, imported_at) VALUES (?, ?)`,
+		filename, importedAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("mark file processed %q: %w", filename, err)
 	}
 	return nil
 }

@@ -90,5 +90,16 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	// Migration 3: track processed PDF filenames to prevent duplicate imports.
+	m3 := `
+		CREATE TABLE IF NOT EXISTS processed_files (
+			filename    TEXT PRIMARY KEY,
+			imported_at TEXT NOT NULL   -- ISO-8601 timestamp
+		);
+	`
+	if _, err := db.Exec(m3); err != nil {
+		return fmt.Errorf("migrate m3: %w", err)
+	}
+
 	return nil
 }

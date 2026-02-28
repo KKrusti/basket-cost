@@ -137,4 +137,30 @@ describe('TicketUploader', () => {
 
     expect(screen.getByRole('button', { name: /subir tickets/i })).not.toBeDisabled();
   });
+
+  it('shows "Ya importado" when the server returns a duplicate-file error', async () => {
+    const duplicateSummary: TicketUploadSummary = {
+      total: 2,
+      succeeded: 1,
+      failed: 1,
+      items: [
+        { file: 'nuevo.pdf', ok: true, result: { invoiceNumber: 'N1', linesImported: 4 } },
+        { file: 'viejo.pdf', ok: false, error: 'Conflict: file already imported' },
+      ],
+    };
+    vi.mocked(productsApi.uploadTickets).mockResolvedValue(duplicateSummary);
+
+    render(<TicketUploader />);
+    const input = screen.getByLabelText(/seleccionar tickets pdf/i);
+
+    const files = [
+      new File(['%PDF'], 'nuevo.pdf', { type: 'application/pdf' }),
+      new File(['%PDF'], 'viejo.pdf', { type: 'application/pdf' }),
+    ];
+    await userEvent.upload(input, files);
+
+    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
+
+    expect(screen.getByText(/ya importado/i)).toBeInTheDocument();
+  });
 });

@@ -165,6 +165,18 @@ describe('uploadTicket', () => {
     const file = new File(['bad'], 'ticket.pdf', { type: 'application/pdf' });
     await expect(uploadTicket(file)).rejects.toThrow('Formato no válido');
   });
+
+  it('throws an Error when the server returns 409 Conflict (duplicate file)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      statusText: 'Conflict',
+      text: () => Promise.resolve('Conflict: file already imported'),
+    }));
+
+    const file = new File(['%PDF'], 'ticket.pdf', { type: 'application/pdf' });
+    await expect(uploadTicket(file)).rejects.toThrow('Conflict: file already imported');
+  });
 });
 
 describe('uploadTickets', () => {

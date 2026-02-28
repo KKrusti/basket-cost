@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -80,7 +81,8 @@ func (c *MercadonaClient) BuildProductIndex(ctx context.Context) (ProductIndex, 
 	for _, id := range subcatIDs {
 		products, err := c.fetchProductsInSubcategory(ctx, id)
 		if err != nil {
-			// Non-fatal: skip subcategory and continue.
+			// Non-fatal: log and skip subcategory.
+			log.Printf("enricher: skip subcategory %d: %v", id, err)
 			continue
 		}
 		for _, p := range products {

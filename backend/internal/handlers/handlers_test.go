@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"basket-cost/internal/database"
+	"basket-cost/internal/enricher"
 	"basket-cost/internal/handlers"
 	"basket-cost/internal/models"
 	"basket-cost/internal/store"
@@ -58,7 +60,7 @@ func newHandlers(t *testing.T) *handlers.Handlers {
 		}
 	}
 
-	return handlers.New(s, nil)
+	return handlers.New(s, nil, nil)
 }
 
 // --- SearchHandler ---
@@ -236,7 +238,7 @@ func newHandlersWithImporter(t *testing.T, imp *ticket.Importer) *handlers.Handl
 	}
 	t.Cleanup(func() { db.Close() })
 	s := store.New(db)
-	return handlers.New(s, imp)
+	return handlers.New(s, imp, nil)
 }
 
 // buildMultipartRequest creates a multipart POST request with a "file" field
@@ -370,4 +372,123 @@ func mustOpenMemDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// --- fakeEnricher ---
+
+// fakeEnricher implements handlers.EnrichRunner without touching the network.
+type fakeEnricher struct {
+	called chan struct{}
+	err    error
+}
+
+func newFakeEnricher() *fakeEnricher {
+	return &fakeEnricher{called: make(chan struct{}, 1)}
+}
+
+func (f *fakeEnricher) Run(_ context.Context) (enricher.EnrichResult, error) {
+	f.called <- struct{}{}
+	return enricher.EnrichResult{Total: 1, Updated: 1}, f.err
+}
+
+// --- enricher integration test ---
+
+func TestTicketHandler_EnricherCalledAfterImport(t *testing.T) {
+	db := mustOpenMemDB(t)
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{text: "raw text"},
+		&fakeTicketParser{t: sampleImportTicket()},
+		store.New(db),
+	)
+	enr := newFakeEnricher()
+
+	s := store.New(mustOpenMemDB(t))
+	h := handlers.New(s, imp, enr)
+
+	req := buildMultipartRequest(t, []byte("%PDF-1.4 fake"))
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", w.Code)
+	}
+
+	// Wait for the background goroutine to call the enricher (generous timeout).
+	select {
+	case <-enr.called:
+		// OK
+	case <-time.After(2 * time.Second):
+		t.Fatal("enricher.Run was not called within 2 seconds")
+	}
+}
+
+func TestTicketHandler_EnricherNil_DoesNotPanic(t *testing.T) {
+	db := mustOpenMemDB(t)
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{text: "raw text"},
+		&fakeTicketParser{t: sampleImportTicket()},
+		store.New(db),
+	)
+	h := handlers.New(store.New(mustOpenMemDB(t)), imp, nil)
+
+	req := buildMultipartRequest(t, []byte("%PDF-1.4 fake"))
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req) // must not panic
+	if w.Code != http.StatusCreated {
+		t.Errorf("expected 201, got %d", w.Code)
+	}
+}
+
+func TestTicketHandler_DuplicateFilename_ReturnsConflict(t *testing.T) {
+	db := mustOpenMemDB(t)
+	s := store.New(db)
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{text: "raw text"},
+		&fakeTicketParser{t: sampleImportTicket()},
+		s,
+	)
+	h := handlers.New(s, imp, nil)
+
+	// First upload: must succeed.
+	req1 := buildMultipartRequest(t, []byte("%PDF-1.4 fake"))
+	w1 := httptest.NewRecorder()
+	h.TicketHandler(w1, req1)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first upload: expected 201, got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// Second upload of the same filename: must be rejected with 409.
+	req2 := buildMultipartRequest(t, []byte("%PDF-1.4 fake"))
+	w2 := httptest.NewRecorder()
+	h.TicketHandler(w2, req2)
+	if w2.Code != http.StatusConflict {
+		t.Errorf("second upload: expected 409 Conflict, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+func TestTicketHandler_FileMarkedProcessedAfterSuccessfulImport(t *testing.T) {
+	db := mustOpenMemDB(t)
+	s := store.New(db)
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{text: "raw text"},
+		&fakeTicketParser{t: sampleImportTicket()},
+		s,
+	)
+	h := handlers.New(s, imp, nil)
+
+	req := buildMultipartRequest(t, []byte("%PDF-1.4 fake"))
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", w.Code)
+	}
+
+	// The filename used by buildMultipartRequest is "ticket.pdf".
+	processed, err := s.IsFileProcessed("ticket.pdf")
+	if err != nil {
+		t.Fatalf("IsFileProcessed: %v", err)
+	}
+	if !processed {
+		t.Error("expected 'ticket.pdf' to be marked as processed after successful import")
+	}
 }

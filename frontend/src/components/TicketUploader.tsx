@@ -180,7 +180,7 @@ export default function TicketUploader() {
                     <span className="ticket-uploader__toast-filename">{item.file}</span>
                     {item.ok
                       ? ` · ${item.result.linesImported} línea${item.result.linesImported !== 1 ? 's' : ''}`
-                      : ` · ${item.error}`}
+                      : ` · ${item.error?.includes('already imported') ? 'Ya importado' : item.error}`}
                   </li>
                 ))}
               </ul>

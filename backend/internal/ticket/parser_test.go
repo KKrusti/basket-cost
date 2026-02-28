@@ -124,8 +124,8 @@ func TestMercadonaParser_WeightProduct(t *testing.T) {
 	if line.Name != "PECHUGA POLLO" {
 		t.Errorf("Name: want %q, got %q", "PECHUGA POLLO", line.Name)
 	}
-	if line.UnitPrice != 6.99 {
-		t.Errorf("UnitPrice (€/kg): want 6.99, got %f", line.UnitPrice)
+	if line.UnitPrice != 2.47 {
+		t.Errorf("UnitPrice (line total): want 2.47, got %f", line.UnitPrice)
 	}
 	if line.Quantity != 1 {
 		t.Errorf("Quantity: want 1, got %d", line.Quantity)
@@ -259,8 +259,8 @@ func TestMercadonaParser_MultiLine_WeightProduct(t *testing.T) {
 	if line.Name != "CARBASSÓ VERD" {
 		t.Errorf("Name: want %q, got %q", "CARBASSÓ VERD", line.Name)
 	}
-	if line.UnitPrice != 2.45 {
-		t.Errorf("UnitPrice (€/kg): want 2.45, got %f", line.UnitPrice)
+	if line.UnitPrice != 1.06 {
+		t.Errorf("UnitPrice (line total): want 1.06, got %f", line.UnitPrice)
 	}
 	if line.Quantity != 1 {
 		t.Errorf("Quantity: want 1, got %d", line.Quantity)

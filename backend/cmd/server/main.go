@@ -2,6 +2,7 @@ package main
 
 import (
 	"basket-cost/internal/database"
+	"basket-cost/internal/enricher"
 	"basket-cost/internal/handlers"
 	"basket-cost/internal/store"
 	"basket-cost/internal/ticket"
@@ -35,7 +36,8 @@ func main() {
 
 	s := store.New(db)
 	imp := ticket.NewImporter(ticket.NewExtractor(), ticket.NewMercadonaParser(), s)
-	h := handlers.New(s, imp)
+	enr := enricher.New(s)
+	h := handlers.New(s, imp, enr)
 	mux := http.NewServeMux()
 
 	// GET /api/products?q=<query> — search products

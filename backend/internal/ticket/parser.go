@@ -72,10 +72,14 @@ var (
 	reUnitMulti = regexp.MustCompile(`^(\d+)\s{2,}(.+?)\s{2,}(\d+,\d{2})\s{2,}\d+,\d{2}\s*$`)
 
 	// Weight continuation in single-line mode: "0,354 kg   6,99 €/kg   2,47"
-	reWeightLineSingle = regexp.MustCompile(`^(\d+,\d+)\s*kg\s+(\d+,\d{2})\s*€/kg\s+\d+,\d{2}\s*$`)
+	// Group 1: weight, group 2: price/kg, group 3: line total (amount paid).
+	reWeightLineSingle = regexp.MustCompile(`^(\d+,\d+)\s*kg\s+(\d+,\d{2})\s*€/kg\s+(\d+,\d{2})\s*$`)
 
 	// Detect if we are inside a single-line body (column header on one line).
 	reColumnHeaderSingle = regexp.MustCompile(`Descripció\s+P\.\s*Unit\s+Import`)
+
+	// Trailing price at end of a line: "1,99" or "12,50 "
+	reTrailingPrice = regexp.MustCompile(`\d+,\d{2}\s*$`)
 )
 
 // Parse implements Parser for Mercadona receipts.
@@ -127,12 +131,13 @@ func (p *MercadonaParser) Parse(text string) (*Ticket, error) {
 func (p *MercadonaParser) parseMultiLineBody(lines []string, t *Ticket) {
 	// States
 	const (
-		sIdle      = iota // looking for start of body
-		sQty              // in body, looking for a qty integer
-		sNameLine         // just consumed qty; expecting product name
-		sPrice            // have qty+name; expecting price or weight
-		sWeightPPK        // have weight; expecting price-per-kg
-		sTotal            // have ppk; expecting line total (discard)
+		sIdle           = iota // looking for start of body
+		sQty                   // in body, looking for a qty integer
+		sNameLine              // just consumed qty; expecting product name
+		sPrice                 // have qty+name; expecting price or weight
+		sWeightPPK             // have weight; expecting price-per-kg
+		sWeightTotal           // have ppk; expecting line total — capture it as UnitPrice
+		sUnitMultiTotal        // qty>1 unit product: next line is total to discard
 	)
 
 	state := sIdle
@@ -208,17 +213,18 @@ func (p *MercadonaParser) parseMultiLineBody(lines []string, t *Ticket) {
 					t.Lines = append(t.Lines, TicketLine{
 						Name:      pendingName,
 						UnitPrice: price,
-						Quantity:  pendingQty,
+						Quantity:  1,
 					})
 					state = sQty
 				} else {
-					// qty > 1: unit price; next line is line total.
+					// qty > 1: this is the unit price; next line is
+					// the line total which we discard.
 					t.Lines = append(t.Lines, TicketLine{
 						Name:      pendingName,
 						UnitPrice: price,
 						Quantity:  pendingQty,
 					})
-					state = sTotal // skip line total
+					state = sUnitMultiTotal
 				}
 				continue
 			}
@@ -226,20 +232,32 @@ func (p *MercadonaParser) parseMultiLineBody(lines []string, t *Ticket) {
 			state = sQty
 
 		case sWeightPPK:
-			if m := rePricePerKg.FindStringSubmatch(trimmed); m != nil {
+			// Expecting the €/kg line. The actual price we store is the
+			// line total on the following line, so we just advance state.
+			if rePricePerKg.MatchString(trimmed) {
+				state = sWeightTotal
+			}
+			// If we see something unexpected, reset.
+
+		case sWeightTotal:
+			// This is the total amount charged for the weight product
+			// (e.g. "1,06"). Use it as UnitPrice with qty=1 so that the
+			// stored value reflects what was actually paid.
+			if m := rePrice.FindStringSubmatch(trimmed); m != nil {
 				price, err := parsePrice(m[1])
 				if err == nil {
 					t.Lines = append(t.Lines, TicketLine{
 						Name:      pendingName,
 						UnitPrice: price,
-						Quantity:  pendingQty,
+						Quantity:  1,
 					})
 				}
-				state = sTotal // next line is line total; skip it
 			}
+			state = sQty
 
-		case sTotal:
-			// Discard the line total value and return to looking for next qty.
+		case sUnitMultiTotal:
+			// Discard the line total for qty>1 unit products and look for
+			// the next product.
 			state = sQty
 		}
 	}
@@ -272,11 +290,13 @@ func (p *MercadonaParser) parseSingleLineBody(lines []string, t *Ticket) {
 		// Weight continuation line.
 		if pendingWeightProduct != "" {
 			if m := reWeightLineSingle.FindStringSubmatch(trimmed); m != nil {
-				pricePerKg, err := parsePrice(m[2])
+				// m[3] is the line total (amount paid); use that as UnitPrice
+				// so the stored value reflects what was actually charged.
+				lineTotal, err := parsePrice(m[3])
 				if err == nil {
 					t.Lines = append(t.Lines, TicketLine{
 						Name:      pendingWeightProduct,
-						UnitPrice: pricePerKg,
+						UnitPrice: lineTotal,
 						Quantity:  1,
 					})
 				}
@@ -321,7 +341,7 @@ func (p *MercadonaParser) parseSingleLineBody(lines []string, t *Ticket) {
 		// Weight product first line: "1   PRODUCT NAME" (no price on this line).
 		if strings.HasPrefix(trimmed, "1 ") || strings.HasPrefix(trimmed, "1\t") {
 			rest := strings.TrimSpace(trimmed[1:])
-			if !regexp.MustCompile(`\d+,\d{2}\s*$`).MatchString(rest) && rest != "" {
+			if !reTrailingPrice.MatchString(rest) && rest != "" {
 				pendingWeightProduct = rest
 				continue
 			}

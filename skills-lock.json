@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "go-linting": {
+      "source": "cxuu/golang-skills",
+      "sourceType": "github",
+      "computedHash": "41effcb704d0836720d02ff497a8b4b5c76e41491612c22b36f67d87b42d3744"
+    },
     "ui-ux-pro-max": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",

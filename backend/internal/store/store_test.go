@@ -378,3 +378,70 @@ func TestUpdateProductImageURL_NoOpOnMissingProduct(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// ---------- IsFileProcessed / MarkFileProcessed ----------
+
+func TestIsFileProcessed_UnknownFile_ReturnsFalse(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.IsFileProcessed("ticket-2026-01.pdf")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("expected false for unknown file, got true")
+	}
+}
+
+func TestMarkFileProcessed_ThenIsFileProcessed_ReturnsTrue(t *testing.T) {
+	s := newTestStore(t)
+	filename := "ticket-2026-02.pdf"
+
+	if err := s.MarkFileProcessed(filename, date(2026, 2, 1)); err != nil {
+		t.Fatalf("MarkFileProcessed: %v", err)
+	}
+
+	got, err := s.IsFileProcessed(filename)
+	if err != nil {
+		t.Fatalf("IsFileProcessed: %v", err)
+	}
+	if !got {
+		t.Error("expected true after marking as processed, got false")
+	}
+}
+
+func TestMarkFileProcessed_Idempotent(t *testing.T) {
+	s := newTestStore(t)
+	filename := "ticket-2026-03.pdf"
+
+	if err := s.MarkFileProcessed(filename, date(2026, 3, 1)); err != nil {
+		t.Fatalf("first MarkFileProcessed: %v", err)
+	}
+	// Second call with same filename must not return an error (INSERT OR IGNORE).
+	if err := s.MarkFileProcessed(filename, date(2026, 3, 2)); err != nil {
+		t.Fatalf("second MarkFileProcessed (idempotent): %v", err)
+	}
+}
+
+func TestIsFileProcessed_DifferentFilenames_IndependentTracking(t *testing.T) {
+	s := newTestStore(t)
+
+	if err := s.MarkFileProcessed("a.pdf", date(2026, 1, 1)); err != nil {
+		t.Fatalf("MarkFileProcessed a.pdf: %v", err)
+	}
+
+	gotA, err := s.IsFileProcessed("a.pdf")
+	if err != nil {
+		t.Fatalf("IsFileProcessed a.pdf: %v", err)
+	}
+	gotB, err := s.IsFileProcessed("b.pdf")
+	if err != nil {
+		t.Fatalf("IsFileProcessed b.pdf: %v", err)
+	}
+
+	if !gotA {
+		t.Error("a.pdf: expected true, got false")
+	}
+	if gotB {
+		t.Error("b.pdf: expected false, got true")
+	}
+}
