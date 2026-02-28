@@ -8,6 +8,7 @@ export interface Product {
   id: string;
   name: string;
   category?: string;
+  imageUrl?: string;
   currentPrice: number;
   priceHistory: PriceRecord[];
 }
@@ -16,6 +17,7 @@ export interface SearchResult {
   id: string;
   name: string;
   category?: string;
+  imageUrl?: string;
   currentPrice: number;
   minPrice: number;
   maxPrice: number;

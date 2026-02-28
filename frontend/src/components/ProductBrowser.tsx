@@ -197,7 +197,7 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
             role="listitem"
             aria-label={product.name}
           >
-            <ProductImage productId={product.id} category={product.category} size="md" />
+            <ProductImage productId={product.id} imageUrl={product.imageUrl} category={product.category} size="md" />
             <span className="browser-product-card__name">{product.name}</span>
             <span className="browser-product-card__price">
               {product.currentPrice.toFixed(2).replace('.', ',')} €

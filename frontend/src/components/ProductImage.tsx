@@ -3,12 +3,14 @@ import { getProductImageUrl, getCategoryEmoji } from '../utils/productImages';
 
 interface ProductImageProps {
   productId: string;
+  imageUrl?: string;
   category: string | undefined;
   size?: 'sm' | 'md';
 }
 
-export default function ProductImage({ productId, category, size = 'md' }: ProductImageProps) {
-  const url = getProductImageUrl(productId);
+export default function ProductImage({ productId, imageUrl, category, size = 'md' }: ProductImageProps) {
+  // Priority: imageUrl from backend → static map fallback → category emoji
+  const url = imageUrl || getProductImageUrl(productId);
   const [imgFailed, setImgFailed] = useState(false);
 
   const showEmoji = !url || imgFailed;

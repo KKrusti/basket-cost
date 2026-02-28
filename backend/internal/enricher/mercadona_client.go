@@ -19,6 +19,34 @@ const (
 	defaultHTTPTimeout = 15 * time.Second
 )
 
+// stopWords are tokens excluded from keyword matching because they appear in
+// almost every product name and contribute no discriminating signal.
+var stopWords = map[string]bool{
+	// Spanish articles, prepositions, conjunctions
+	"de": true, "del": true, "la": true, "el": true, "los": true, "las": true,
+	"un": true, "una": true, "en": true, "con": true, "sin": true, "y": true,
+	"a": true, "al": true, "o": true, "para": true, "por": true, "e": true,
+	// Units / formats
+	"kg": true, "g": true, "ml": true, "l": true, "cl": true, "ud": true,
+	"uds": true, "u": true, "pack": true, "bot": true, "lata": true,
+	// Catalan articles & prepositions (tickets from Catalan stores)
+	"dels": true, "les": true, "uns": true, "unes": true, "amb": true,
+	"per": true, "i": true, "d": true, "s": true,
+}
+
+// keywords returns the significant tokens from a normalised product name.
+// Tokens shorter than 3 characters or in the stop-word list are discarded.
+func keywords(normalised string) []string {
+	parts := strings.Fields(normalised)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if len([]rune(p)) >= 3 && !stopWords[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // MercadonaClient fetches product data from the Mercadona public REST API.
 type MercadonaClient struct {
 	http    *http.Client
@@ -64,20 +92,28 @@ type mercadonaProduct struct {
 	Thumbnail   string `json:"thumbnail"`
 }
 
-// ProductIndex maps a normalised product name to a thumbnail URL.
-// Normalisation: lowercase, strip non-letter/digit runes, collapse spaces.
-type ProductIndex map[string]string
+// ProductEntry holds the thumbnail URL and the keyword set for one Mercadona
+// product. The keyword set is used for fuzzy matching against local names.
+type ProductEntry struct {
+	Thumbnail string
+	Keywords  []string
+}
+
+// ProductIndex is a list of all Mercadona products with their keyword sets.
+// It is searched linearly; given the catalogue size (~2 000 products) this is
+// fast enough and avoids the complexity of an inverted index.
+type ProductIndex []ProductEntry
 
 // BuildProductIndex downloads all published subcategories from Mercadona,
 // collects every product's display_name and thumbnail, and returns an index
-// suitable for matching by normalised name.
+// ready for keyword-based matching.
 func (c *MercadonaClient) BuildProductIndex(ctx context.Context) (ProductIndex, error) {
 	subcatIDs, err := c.fetchSubcategoryIDs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("fetch subcategory ids: %w", err)
 	}
 
-	index := make(ProductIndex, len(subcatIDs)*20)
+	var index ProductIndex
 	for _, id := range subcatIDs {
 		products, err := c.fetchProductsInSubcategory(ctx, id)
 		if err != nil {
@@ -89,10 +125,14 @@ func (c *MercadonaClient) BuildProductIndex(ctx context.Context) (ProductIndex, 
 			if p.Thumbnail == "" {
 				continue
 			}
-			key := normalise(p.DisplayName)
-			if key != "" {
-				index[key] = p.Thumbnail
+			kw := keywords(normalise(p.DisplayName))
+			if len(kw) == 0 {
+				continue
 			}
+			index = append(index, ProductEntry{
+				Thumbnail: p.Thumbnail,
+				Keywords:  kw,
+			})
 		}
 	}
 	return index, nil
