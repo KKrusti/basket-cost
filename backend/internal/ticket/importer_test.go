@@ -40,12 +40,14 @@ type fakeStore struct {
 	err     error
 }
 
-func (f *fakeStore) UpsertPriceRecord(name string, record models.PriceRecord) error {
+func (f *fakeStore) UpsertPriceRecordBatch(entries []models.PriceRecordEntry) error {
 	if f.err != nil {
 		return f.err
 	}
-	f.names = append(f.names, name)
-	f.records = append(f.records, record)
+	for _, e := range entries {
+		f.names = append(f.names, e.Name)
+		f.records = append(f.records, e.Record)
+	}
 	return nil
 }
 
@@ -112,22 +114,19 @@ func TestImporter_Import_ParserError(t *testing.T) {
 	}
 }
 
-func TestImporter_Import_StoreError_PartialResult(t *testing.T) {
+func TestImporter_Import_StoreError_ReturnsError(t *testing.T) {
 	imp := ticket.NewImporter(
 		&fakeExtractor{text: "some text"},
 		&fakeParser{t: sampleTicket()},
 		&fakeStore{err: errors.New("db locked")},
 	)
 	result, err := imp.Import(bytes.NewReader([]byte{}), 0)
-	// Partial error is returned but result is non-nil.
+	// With all-or-nothing semantics the whole import fails.
 	if err == nil {
-		t.Error("expected partial error, got nil")
+		t.Error("expected error from batch store failure, got nil")
 	}
-	if result == nil {
-		t.Fatal("expected non-nil result even on partial error")
-	}
-	if result.LinesImported != 0 {
-		t.Errorf("expected 0 lines imported on store failure, got %d", result.LinesImported)
+	if result != nil {
+		t.Errorf("expected nil result on store failure, got %+v", result)
 	}
 }
 

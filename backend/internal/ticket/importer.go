@@ -3,7 +3,6 @@ package ticket
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"basket-cost/internal/models"
 )
@@ -12,7 +11,9 @@ import (
 // Using a narrow interface keeps the ticket package decoupled from the full
 // store package and makes testing easier.
 type TicketStore interface {
-	UpsertPriceRecord(name string, record models.PriceRecord) error
+	// UpsertPriceRecordBatch persists all entries inside a single transaction.
+	// Either every entry is committed or none is (all-or-nothing).
+	UpsertPriceRecordBatch(entries []models.PriceRecordEntry) error
 }
 
 // ImportResult summarises the outcome of a single ticket import.
@@ -40,7 +41,8 @@ func NewImporter(extractor PDFExtractor, parser Parser, store TicketStore) *Impo
 }
 
 // Import reads a PDF from r, parses it as a Mercadona receipt, and persists
-// each product line as a price record.
+// all product lines atomically inside a single transaction.
+// If any line fails to persist the entire ticket is rolled back.
 // r must implement io.ReaderAt; use bytes.NewReader for in-memory data.
 func (imp *Importer) Import(r io.ReaderAt, size int64) (*ImportResult, error) {
 	text, err := imp.extractor.Extract(r, size)
@@ -53,24 +55,24 @@ func (imp *Importer) Import(r io.ReaderAt, size int64) (*ImportResult, error) {
 		return nil, fmt.Errorf("parse receipt: %w", err)
 	}
 
-	result := &ImportResult{InvoiceNumber: t.InvoiceNumber}
-
-	var errs []string
-	for _, line := range t.Lines {
-		rec := models.PriceRecord{
-			Date:  t.Date,
-			Price: line.UnitPrice,
-			Store: t.Store,
+	entries := make([]models.PriceRecordEntry, len(t.Lines))
+	for i, line := range t.Lines {
+		entries[i] = models.PriceRecordEntry{
+			Name: line.Name,
+			Record: models.PriceRecord{
+				Date:  t.Date,
+				Price: line.UnitPrice,
+				Store: t.Store,
+			},
 		}
-		if err := imp.store.UpsertPriceRecord(line.Name, rec); err != nil {
-			errs = append(errs, fmt.Sprintf("upsert %q: %v", line.Name, err))
-			continue
-		}
-		result.LinesImported++
 	}
 
-	if len(errs) > 0 {
-		return result, fmt.Errorf("partial import errors: %s", strings.Join(errs, "; "))
+	if err := imp.store.UpsertPriceRecordBatch(entries); err != nil {
+		return nil, fmt.Errorf("persist ticket %s: %w", t.InvoiceNumber, err)
 	}
-	return result, nil
+
+	return &ImportResult{
+		InvoiceNumber: t.InvoiceNumber,
+		LinesImported: len(entries),
+	}, nil
 }

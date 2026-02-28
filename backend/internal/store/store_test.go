@@ -445,3 +445,101 @@ func TestIsFileProcessed_DifferentFilenames_IndependentTracking(t *testing.T) {
 		t.Error("b.pdf: expected false, got true")
 	}
 }
+
+// ---------- UpsertPriceRecordBatch ----------
+
+func TestUpsertPriceRecordBatch_AllEntriesCommitted(t *testing.T) {
+	s := newTestStore(t)
+
+	entries := []models.PriceRecordEntry{
+		{Name: "LECHE ENTERA", Record: models.PriceRecord{Date: date(2026, 1, 1), Price: 0.89, Store: "Mercadona"}},
+		{Name: "PAN INTEGRAL", Record: models.PriceRecord{Date: date(2026, 1, 1), Price: 1.25, Store: "Mercadona"}},
+		{Name: "YOGUR NATURAL", Record: models.PriceRecord{Date: date(2026, 1, 1), Price: 0.35, Store: "Mercadona"}},
+	}
+	if err := s.UpsertPriceRecordBatch(entries); err != nil {
+		t.Fatalf("UpsertPriceRecordBatch: %v", err)
+	}
+
+	results, err := s.SearchProducts("")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("want 3 products, got %d", len(results))
+	}
+}
+
+func TestUpsertPriceRecordBatch_EmptySlice_NoOp(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.UpsertPriceRecordBatch([]models.PriceRecordEntry{}); err != nil {
+		t.Fatalf("UpsertPriceRecordBatch with empty slice: %v", err)
+	}
+	results, err := s.SearchProducts("")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("want 0 products after no-op batch, got %d", len(results))
+	}
+}
+
+func TestUpsertPriceRecordBatch_IdempotentProduct(t *testing.T) {
+	s := newTestStore(t)
+
+	entry := models.PriceRecordEntry{
+		Name:   "LECHE ENTERA",
+		Record: models.PriceRecord{Date: date(2026, 1, 1), Price: 0.89, Store: "Mercadona"},
+	}
+	// Insert twice: the product row should appear only once, but two price records.
+	if err := s.UpsertPriceRecordBatch([]models.PriceRecordEntry{entry}); err != nil {
+		t.Fatalf("first batch: %v", err)
+	}
+	entry2 := models.PriceRecordEntry{
+		Name:   "LECHE ENTERA",
+		Record: models.PriceRecord{Date: date(2026, 2, 1), Price: 0.92, Store: "Mercadona"},
+	}
+	if err := s.UpsertPriceRecordBatch([]models.PriceRecordEntry{entry2}); err != nil {
+		t.Fatalf("second batch: %v", err)
+	}
+
+	p, err := s.GetProductByID("leche-entera")
+	if err != nil {
+		t.Fatalf("GetProductByID: %v", err)
+	}
+	if p == nil {
+		t.Fatal("expected product, got nil")
+	}
+	if len(p.PriceHistory) != 2 {
+		t.Errorf("want 2 price records, got %d", len(p.PriceHistory))
+	}
+}
+
+func TestUpsertPriceRecordBatch_PriceAndDatePreserved(t *testing.T) {
+	s := newTestStore(t)
+
+	want := models.PriceRecord{Date: date(2026, 3, 15), Price: 2.49, Store: "Mercadona"}
+	entries := []models.PriceRecordEntry{
+		{Name: "ACEITE GIRASOL", Record: want},
+	}
+	if err := s.UpsertPriceRecordBatch(entries); err != nil {
+		t.Fatalf("UpsertPriceRecordBatch: %v", err)
+	}
+
+	p, err := s.GetProductByID("aceite-girasol")
+	if err != nil {
+		t.Fatalf("GetProductByID: %v", err)
+	}
+	if p == nil || len(p.PriceHistory) == 0 {
+		t.Fatal("expected product with price history")
+	}
+	got := p.PriceHistory[0]
+	if got.Price != want.Price {
+		t.Errorf("Price: want %.2f, got %.2f", want.Price, got.Price)
+	}
+	if !got.Date.Equal(want.Date) {
+		t.Errorf("Date: want %s, got %s", want.Date, got.Date)
+	}
+	if got.Store != want.Store {
+		t.Errorf("Store: want %q, got %q", want.Store, got.Store)
+	}
+}

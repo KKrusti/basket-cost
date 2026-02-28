@@ -19,6 +19,11 @@ type Store interface {
 	// UpsertPriceRecord ensures the named product exists (creating it if needed)
 	// and appends a new price record for the given observation.
 	UpsertPriceRecord(name string, record models.PriceRecord) error
+	// UpsertPriceRecordBatch persists all (name, record) pairs inside a single
+	// transaction. Either every pair is committed or none is (all-or-nothing).
+	// Use this instead of calling UpsertPriceRecord in a loop to reduce the
+	// number of round-trips to SQLite from N commits to 1.
+	UpsertPriceRecordBatch(entries []models.PriceRecordEntry) error
 	// UpdateProductImageURL sets the image URL for the product with the given ID.
 	UpdateProductImageURL(id, imageURL string) error
 	// IsFileProcessed returns true when filename has already been imported.
@@ -165,6 +170,43 @@ func (s *SQLiteStore) UpsertPriceRecord(name string, record models.PriceRecord) 
 	)
 	if err != nil {
 		return fmt.Errorf("insert price record for product %q: %w", name, err)
+	}
+
+	return tx.Commit()
+}
+
+// UpsertPriceRecordBatch persists all entries inside a single transaction.
+// Either every entry is committed or none is (all-or-nothing semantics).
+// Calling it with an empty slice is a no-op that returns nil.
+func (s *SQLiteStore) UpsertPriceRecordBatch(entries []models.PriceRecordEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	for _, e := range entries {
+		id := slugify(e.Name)
+
+		_, err = tx.Exec(
+			`INSERT OR IGNORE INTO products (id, name, category) VALUES (?, ?, ?)`,
+			id, e.Name, "",
+		)
+		if err != nil {
+			return fmt.Errorf("upsert product %q: %w", e.Name, err)
+		}
+
+		_, err = tx.Exec(
+			`INSERT INTO price_records (product_id, date, price, store) VALUES (?, ?, ?, ?)`,
+			id, e.Record.Date.Format(time.DateOnly), e.Record.Price, e.Record.Store,
+		)
+		if err != nil {
+			return fmt.Errorf("insert price record for product %q: %w", e.Name, err)
+		}
 	}
 
 	return tx.Commit()

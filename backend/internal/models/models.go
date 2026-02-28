@@ -30,3 +30,10 @@ type SearchResult struct {
 	MinPrice     float64 `json:"minPrice"`
 	MaxPrice     float64 `json:"maxPrice"`
 }
+
+// PriceRecordEntry is the unit of work for batch price-record persistence.
+// It pairs a product name with the price observation to record.
+type PriceRecordEntry struct {
+	Name   string
+	Record PriceRecord
+}
