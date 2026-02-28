@@ -2,10 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import type { SearchResult } from '../types';
 import { searchProducts } from '../api/products';
 import ProductBrowser from './ProductBrowser';
+import type { ProductBrowserState } from './ProductBrowser';
 import ProductImage from './ProductImage';
 
 interface SearchBarProps {
   onSelectProduct: (id: string) => void;
+  browserState?: ProductBrowserState;
+  onBrowserStateChange?: (state: ProductBrowserState) => void;
 }
 
 function SearchIcon() {
@@ -45,7 +48,7 @@ function EmptyResultsIcon() {
   );
 }
 
-export default function SearchBar({ onSelectProduct }: SearchBarProps) {
+export default function SearchBar({ onSelectProduct, browserState, onBrowserStateChange }: SearchBarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -146,7 +149,11 @@ export default function SearchBar({ onSelectProduct }: SearchBarProps) {
         )}
 
         {!loading && !searched && (
-          <ProductBrowser onSelectProduct={onSelectProduct} />
+          <ProductBrowser
+            onSelectProduct={onSelectProduct}
+            browserState={browserState}
+            onBrowserStateChange={onBrowserStateChange}
+          />
         )}
       </div>
     </div>

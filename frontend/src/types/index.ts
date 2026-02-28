@@ -21,6 +21,7 @@ export interface SearchResult {
   currentPrice: number;
   minPrice: number;
   maxPrice: number;
+  lastPurchaseDate?: string;
 }
 
 export interface TicketUploadResult {

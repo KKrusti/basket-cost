@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ProductBrowser from './ProductBrowser';
+import type { ProductBrowserState } from './ProductBrowser';
 import * as productsApi from '../api/products';
 import type { SearchResult } from '../types';
 
@@ -14,8 +15,8 @@ const mockProducts: SearchResult[] = [
   { id: '10', name: 'PLATANOS KG', category: undefined, currentPrice: 1.99, minPrice: 1.69, maxPrice: 1.99 },
 ];
 
-// 25 products to test pagination (total: 25 > 24 default page size)
-const manyProducts: SearchResult[] = Array.from({ length: 25 }, (_, i) => ({
+// 49 products to test pagination (total: 49 > 48 default page size)
+const manyProducts: SearchResult[] = Array.from({ length: 49 }, (_, i) => ({
   id: String(i + 1),
   name: `PRODUCTO ${i + 1}`,
   category: 'Test',
@@ -104,7 +105,7 @@ describe('ProductBrowser', () => {
     render(<ProductBrowser onSelectProduct={vi.fn()} />);
     await waitFor(() => screen.getByTestId('browser-grid'));
 
-    // Default page size is 24; 25 products → 2 pages.
+    // Default page size is 48; 49 products → 2 pages.
     expect(screen.getByRole('navigation', { name: 'Paginación' })).toBeInTheDocument();
     expect(screen.getByText('1 / 2')).toBeInTheDocument();
   });
@@ -144,8 +145,8 @@ describe('ProductBrowser', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Página siguiente' }));
     expect(screen.getByText('2 / 2')).toBeInTheDocument();
 
-    // Change page size to 48 (all 25 fit in one page → no pagination rendered).
-    await userEvent.click(screen.getByRole('button', { name: '48' }));
+    // Change page size to 96 (all 49 fit in one page → no pagination rendered).
+    await userEvent.click(screen.getByRole('button', { name: '96' }));
     expect(screen.queryByRole('navigation', { name: 'Paginación' })).not.toBeInTheDocument();
   });
 
@@ -155,5 +156,31 @@ describe('ProductBrowser', () => {
     await waitFor(() => screen.getByTestId('browser-grid'));
 
     expect(screen.queryByRole('navigation', { name: 'Paginación' })).not.toBeInTheDocument();
+  });
+
+  it('page size options include 12, 24, 48 and 96', async () => {
+    vi.mocked(productsApi.getAllProducts).mockResolvedValue(mockProducts);
+    render(<ProductBrowser onSelectProduct={vi.fn()} />);
+    await waitFor(() => screen.getByTestId('browser-grid'));
+
+    for (const size of ['12', '24', '48', '96']) {
+      expect(screen.getByRole('button', { name: size })).toBeInTheDocument();
+    }
+  });
+
+  it('restores page when rendered in controlled mode with existing state', async () => {
+    vi.mocked(productsApi.getAllProducts).mockResolvedValue(manyProducts);
+    const state: ProductBrowserState = { page: 1, pageSize: 48, columns: 3 };
+    render(
+      <ProductBrowser
+        onSelectProduct={vi.fn()}
+        browserState={state}
+        onBrowserStateChange={vi.fn()}
+      />
+    );
+    await waitFor(() => screen.getByTestId('browser-grid'));
+
+    // Page 2 of 2 should be shown because state says page=1.
+    expect(screen.getByText('2 / 2')).toBeInTheDocument();
   });
 });

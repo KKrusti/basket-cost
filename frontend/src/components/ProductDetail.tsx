@@ -40,6 +40,54 @@ function BackArrowIcon() {
   );
 }
 
+function ArrowUpIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" aria-hidden="true">
+      <polyline points="8 3 13 8 3 8" strokeLinejoin="round" />
+      <line x1="8" y1="3" x2="8" y2="13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
+function ArrowDownIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12" aria-hidden="true">
+      <polyline points="8 13 13 8 3 8" strokeLinejoin="round" />
+      <line x1="8" y1="13" x2="8" y2="3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
+interface PriceChangeBadgeProps {
+  firstPrice: number;
+  currentPrice: number;
+}
+
+function PriceChangeBadge({ firstPrice, currentPrice }: PriceChangeBadgeProps) {
+  if (firstPrice === 0) return null;
+  const pct = ((currentPrice - firstPrice) / firstPrice) * 100;
+  const isUp = pct > 0;
+  const isDown = pct < 0;
+  const modifier = isUp ? 'up' : isDown ? 'down' : 'flat';
+  const label = isUp
+    ? `Subida del ${pct.toFixed(1).replace('.', ',')}% desde el primer registro`
+    : isDown
+    ? `Bajada del ${Math.abs(pct).toFixed(1).replace('.', ',')}% desde el primer registro`
+    : 'Sin variación desde el primer registro';
+
+  return (
+    <span
+      className={`price-change-badge price-change-badge--${modifier}`}
+      aria-label={label}
+      title={label}
+    >
+      {isUp && <ArrowUpIcon />}
+      {isDown && <ArrowDownIcon />}
+      {pct === 0 ? '0%' : `${pct > 0 ? '+' : ''}${pct.toFixed(1).replace('.', ',')}%`}
+    </span>
+  );
+}
+
 export default function ProductDetail({ productId, onBack }: ProductDetailProps) {
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
@@ -128,6 +176,12 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
         <div className="detail-header__price">
           <div className="price">{formatPrice(product.currentPrice)}</div>
           <div className="detail-header__price-label">precio actual</div>
+          {product.priceHistory.length >= 2 && (
+            <PriceChangeBadge
+              firstPrice={product.priceHistory[0].price}
+              currentPrice={product.priceHistory[product.priceHistory.length - 1].price}
+            />
+          )}
         </div>
       </div>
 

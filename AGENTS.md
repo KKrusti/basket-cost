@@ -20,7 +20,7 @@ Always communicate with the user in **Spanish**, regardless of the language used
 
 ## Project Overview
 
-Two-tier SPA for tracking grocery prices in the Spanish market.
+**Mercaflación** — Two-tier SPA for tracking and comparing grocery prices in the Spanish market (Mercadona receipts).
 
 - **Backend:** Go 1.24, SQLite via `modernc.org/sqlite` (CGO-free), PDF parsing via `ledongthuc/pdf`. JSON REST API on `:8080`.
 - **Frontend:** React 18 + TypeScript + Vite, on `:5173`. Proxies `/api` to the backend.
@@ -92,7 +92,7 @@ basket-cost/
 │   │   └── enrich/main.go            # CLI: download product images from the Mercadona API
 │   └── internal/
 │       ├── database/db.go            # SQLite connection, WAL pragmas, schema migrations
-│       ├── models/models.go          # domain types: Product, PriceRecord, SearchResult
+│       ├── models/models.go          # domain types: Product, PriceRecord, SearchResult, PriceRecordEntry
 │       ├── store/
 │       │   ├── store.go              # Store interface + SQLiteStore implementation
 │       │   └── store_test.go
@@ -116,7 +116,7 @@ basket-cost/
     ├── package.json
     └── src/
         ├── main.tsx                  # ReactDOM.createRoot entry point
-        ├── App.tsx                   # app shell: header with TicketUploader + SearchBar/ProductDetail
+        ├── App.tsx                   # app shell: header with TicketUploader + SearchBar/ProductDetail; owns browserState for persistence
         ├── App.test.tsx
         ├── index.css                 # design system: CSS variables, all component styles
         ├── test/setup.ts             # Vitest global setup (@testing-library/jest-dom)
@@ -125,11 +125,11 @@ basket-cost/
         │   ├── products.ts           # fetch-based API client (search, getProduct, uploadTicket, uploadTickets)
         │   └── products.test.ts
         ├── components/
-        │   ├── SearchBar.tsx         # search input with 300 ms debounce + result list
+        │   ├── SearchBar.tsx         # search input with 300 ms debounce + result list; accepts browserState/onBrowserStateChange props
         │   ├── SearchBar.test.tsx
-        │   ├── ProductBrowser.tsx    # full catalogue grid with page-size and column-count controls
+        │   ├── ProductBrowser.tsx    # full catalogue grid; exports ProductBrowserState; controlled/uncontrolled pattern; pageSize default 48; options [12,24,48,96]
         │   ├── ProductBrowser.test.tsx
-        │   ├── ProductDetail.tsx     # product detail: Recharts line chart + price history table
+        │   ├── ProductDetail.tsx     # product detail: Recharts line chart + price history table + PriceChangeBadge
         │   ├── ProductDetail.test.tsx
         │   ├── ProductImage.tsx      # product image with emoji fallback
         │   ├── ProductImage.test.tsx
@@ -183,6 +183,32 @@ interface TicketUploadSummary {
   items: TicketUploadItem[];   // discriminated union: ok/error per file
 }
 ```
+
+---
+
+## Key Design Patterns
+
+### ProductBrowser — controlled/uncontrolled state
+
+`ProductBrowser` accepts optional `browserState: ProductBrowserState` and `onBrowserStateChange` props. When provided, the parent owns the state; otherwise the component manages it internally. `App.tsx` uses this pattern to preserve pagination/page-size/columns when the user navigates to `ProductDetail` and returns.
+
+```ts
+export interface ProductBrowserState {
+  page: number;
+  pageSize: 12 | 24 | 48 | 96;
+  columns: 3 | 4;
+}
+```
+
+Default internal state: `{ page: 0, pageSize: 48, columns: 3 }`.
+
+### SearchResult ordering
+
+`store.SearchProducts` computes `MAX(date) AS last_date` per product and orders by `last_date DESC, p.name`. This surfaces the most recently purchased products first. The `lastPurchaseDate` field (`omitempty`) is included in `models.SearchResult` and `types/index.ts`.
+
+### PriceChangeBadge
+
+`ProductDetail` renders an inline `PriceChangeBadge` component showing the overall price variation since the first recorded price: `((currentPrice - firstPrice) / firstPrice) × 100`. CSS modifier classes: `.price-change-badge--up` (red), `.price-change-badge--down` (green), `.price-change-badge--flat` (neutral). Only visible when there are ≥ 2 price records.
 
 ---
 

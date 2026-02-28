@@ -22,13 +22,14 @@ type Product struct {
 
 // SearchResult is a lightweight version of Product returned in search listings.
 type SearchResult struct {
-	ID           string  `json:"id"`
-	Name         string  `json:"name"`
-	Category     string  `json:"category,omitempty"`
-	ImageURL     string  `json:"imageUrl,omitempty"`
-	CurrentPrice float64 `json:"currentPrice"`
-	MinPrice     float64 `json:"minPrice"`
-	MaxPrice     float64 `json:"maxPrice"`
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	Category         string  `json:"category,omitempty"`
+	ImageURL         string  `json:"imageUrl,omitempty"`
+	CurrentPrice     float64 `json:"currentPrice"`
+	MinPrice         float64 `json:"minPrice"`
+	MaxPrice         float64 `json:"maxPrice"`
+	LastPurchaseDate string  `json:"lastPurchaseDate,omitempty"`
 }
 
 // PriceRecordEntry is the unit of work for batch price-record persistence.

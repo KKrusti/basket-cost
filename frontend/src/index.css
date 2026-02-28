@@ -655,6 +655,36 @@ body {
   margin-top: 0.15rem;
 }
 
+/* ─── Price Change Badge ─────────────────────────────────── */
+.price-change-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.4rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+}
+
+.price-change-badge--up {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.price-change-badge--down {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.price-change-badge--flat {
+  background: var(--color-bg-alt);
+  color: var(--color-text-muted);
+}
+
 /* ─── Chart ──────────────────────────────────────────────── */
 .chart-container {
   margin-top: 1.25rem;

@@ -3,14 +3,22 @@ import type { SearchResult } from '../types';
 import { getAllProducts } from '../api/products';
 import ProductImage from './ProductImage';
 
-interface ProductBrowserProps {
-  onSelectProduct: (id: string) => void;
+type Columns = 3 | 4;
+type PageSize = 12 | 24 | 48 | 96;
+
+const PAGE_SIZES: PageSize[] = [12, 24, 48, 96];
+
+export interface ProductBrowserState {
+  page: number;
+  pageSize: PageSize;
+  columns: Columns;
 }
 
-type Columns = 3 | 4;
-type PageSize = 12 | 24 | 48;
-
-const PAGE_SIZES: PageSize[] = [12, 24, 48];
+interface ProductBrowserProps {
+  onSelectProduct: (id: string) => void;
+  browserState?: ProductBrowserState;
+  onBrowserStateChange?: (state: ProductBrowserState) => void;
+}
 
 // SVG icons — inline, no external dependency
 
@@ -67,13 +75,32 @@ function ChevronRightIcon() {
   );
 }
 
-export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps) {
+const DEFAULT_STATE: ProductBrowserState = { page: 0, pageSize: 48, columns: 3 };
+
+export default function ProductBrowser({
+  onSelectProduct,
+  browserState,
+  onBrowserStateChange,
+}: ProductBrowserProps) {
+  const controlled = browserState !== undefined && onBrowserStateChange !== undefined;
+
+  // Internal state — used only when running uncontrolled (no parent state provided).
+  const [internalState, setInternalState] = useState<ProductBrowserState>(DEFAULT_STATE);
+
+  const { page, pageSize, columns } = controlled ? browserState : internalState;
+
+  function updateState(next: Partial<ProductBrowserState>) {
+    const updated = { ...(controlled ? browserState : internalState), ...next };
+    if (controlled) {
+      onBrowserStateChange(updated);
+    } else {
+      setInternalState(updated);
+    }
+  }
+
   const [products, setProducts] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [columns, setColumns] = useState<Columns>(3);
-  const [pageSize, setPageSize] = useState<PageSize>(24);
-  const [page, setPage] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,13 +124,11 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
 
   // Reset to first page when page size or columns change.
   function handlePageSize(size: PageSize) {
-    setPageSize(size);
-    setPage(0);
+    updateState({ pageSize: size, page: 0 });
   }
 
   function handleColumns(cols: Columns) {
-    setColumns(cols);
-    setPage(0);
+    updateState({ columns: cols, page: 0 });
   }
 
   if (loading) {
@@ -134,7 +159,9 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
   }
 
   const totalPages = Math.ceil(products.length / pageSize);
-  const start = page * pageSize;
+  // Clamp page in case the list shrank after a reload.
+  const safePage = Math.min(page, Math.max(0, totalPages - 1));
+  const start = safePage * pageSize;
   const visibleProducts = products.slice(start, start + pageSize);
 
   return (
@@ -211,21 +238,21 @@ export default function ProductBrowser({ onSelectProduct }: ProductBrowserProps)
         <div className="browser-pagination" role="navigation" aria-label="Paginación">
           <button
             className="browser-pagination__btn"
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0}
+            onClick={() => updateState({ page: Math.max(0, safePage - 1) })}
+            disabled={safePage === 0}
             aria-label="Página anterior"
           >
             <ChevronLeftIcon />
           </button>
 
           <span className="browser-pagination__info">
-            {page + 1} / {totalPages}
+            {safePage + 1} / {totalPages}
           </span>
 
           <button
             className="browser-pagination__btn"
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            disabled={page === totalPages - 1}
+            onClick={() => updateState({ page: Math.min(totalPages - 1, safePage + 1) })}
+            disabled={safePage === totalPages - 1}
             aria-label="Página siguiente"
           >
             <ChevronRightIcon />

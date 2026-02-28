@@ -2,6 +2,7 @@ import { useState } from 'react';
 import SearchBar from './components/SearchBar';
 import ProductDetail from './components/ProductDetail';
 import TicketUploader from './components/TicketUploader';
+import type { ProductBrowserState } from './components/ProductBrowser';
 
 function AppLogo() {
   return (
@@ -20,6 +21,11 @@ function AppLogo() {
 
 export default function App() {
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [browserState, setBrowserState] = useState<ProductBrowserState>({
+    page: 0,
+    pageSize: 48,
+    columns: 3,
+  });
 
   return (
     <div className="app">
@@ -42,7 +48,11 @@ export default function App() {
             onBack={() => setSelectedProductId(null)}
           />
         ) : (
-          <SearchBar onSelectProduct={setSelectedProductId} />
+          <SearchBar
+            onSelectProduct={setSelectedProductId}
+            browserState={browserState}
+            onBrowserStateChange={setBrowserState}
+          />
         )}
       </div>
     </div>

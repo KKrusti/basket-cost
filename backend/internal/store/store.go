@@ -77,7 +77,8 @@ func (s *SQLiteStore) InsertProduct(p models.Product) error {
 }
 
 // SearchProducts returns products whose name contains query (case-insensitive).
-// An empty query returns all products.
+// An empty query returns all products. Results are ordered by the most recent
+// purchase date descending so freshly-bought items appear first.
 func (s *SQLiteStore) SearchProducts(query string) ([]models.SearchResult, error) {
 	const baseSQL = `
 		SELECT
@@ -87,7 +88,8 @@ func (s *SQLiteStore) SearchProducts(query string) ([]models.SearchResult, error
 			p.image_url,
 			(SELECT price FROM price_records WHERE product_id = p.id ORDER BY date DESC LIMIT 1) AS current_price,
 			(SELECT MIN(price) FROM price_records WHERE product_id = p.id)                        AS min_price,
-			(SELECT MAX(price) FROM price_records WHERE product_id = p.id)                        AS max_price
+			(SELECT MAX(price) FROM price_records WHERE product_id = p.id)                        AS max_price,
+			(SELECT MAX(date)  FROM price_records WHERE product_id = p.id)                        AS last_date
 		FROM products p
 	`
 
@@ -97,10 +99,10 @@ func (s *SQLiteStore) SearchProducts(query string) ([]models.SearchResult, error
 	)
 
 	if strings.TrimSpace(query) == "" {
-		rows, err = s.db.Query(baseSQL + " ORDER BY p.name")
+		rows, err = s.db.Query(baseSQL + " ORDER BY last_date DESC, p.name")
 	} else {
 		rows, err = s.db.Query(
-			baseSQL+` WHERE p.name LIKE ? ORDER BY p.name`,
+			baseSQL+` WHERE p.name LIKE ? ORDER BY last_date DESC, p.name`,
 			"%"+query+"%",
 		)
 	}
@@ -112,9 +114,9 @@ func (s *SQLiteStore) SearchProducts(query string) ([]models.SearchResult, error
 	var results []models.SearchResult
 	for rows.Next() {
 		var r models.SearchResult
-		var category, imageURL sql.NullString
+		var category, imageURL, lastDate sql.NullString
 		var currentPrice, minPrice, maxPrice sql.NullFloat64
-		if err := rows.Scan(&r.ID, &r.Name, &category, &imageURL, &currentPrice, &minPrice, &maxPrice); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &category, &imageURL, &currentPrice, &minPrice, &maxPrice, &lastDate); err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
 		r.Category = category.String
@@ -122,6 +124,7 @@ func (s *SQLiteStore) SearchProducts(query string) ([]models.SearchResult, error
 		r.CurrentPrice = currentPrice.Float64
 		r.MinPrice = minPrice.Float64
 		r.MaxPrice = maxPrice.Float64
+		r.LastPurchaseDate = lastDate.String
 		results = append(results, r)
 	}
 	if err := rows.Err(); err != nil {

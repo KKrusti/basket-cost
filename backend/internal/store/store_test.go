@@ -310,6 +310,74 @@ func TestSearchProducts_MinMaxPrice(t *testing.T) {
 	}
 }
 
+func TestSearchProducts_LastPurchaseDatePopulated(t *testing.T) {
+	s := newTestStore(t)
+	p := models.Product{
+		ID:       "lpd",
+		Name:     "YOGUR NATURAL",
+		Category: "Lácteos",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 0.30, Store: "Mercadona"},
+			{Date: date(2025, 9, 15), Price: 0.35, Store: "Mercadona"},
+		},
+	}
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	results, err := s.SearchProducts("")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("want 1 result, got %d", len(results))
+	}
+	if results[0].LastPurchaseDate != "2025-09-15" {
+		t.Errorf("LastPurchaseDate: want %q, got %q", "2025-09-15", results[0].LastPurchaseDate)
+	}
+}
+
+func TestSearchProducts_OrderedByLastPurchaseDateDesc(t *testing.T) {
+	s := newTestStore(t)
+
+	// Insert two products with different last purchase dates.
+	older := models.Product{
+		ID:   "old",
+		Name: "PAN INTEGRAL",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2024, 1, 1), Price: 1.00, Store: "A"},
+		},
+	}
+	newer := models.Product{
+		ID:   "new",
+		Name: "LECHE ENTERA",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2026, 2, 1), Price: 0.89, Store: "A"},
+		},
+	}
+	if err := s.InsertProduct(older); err != nil {
+		t.Fatalf("insert older: %v", err)
+	}
+	if err := s.InsertProduct(newer); err != nil {
+		t.Fatalf("insert newer: %v", err)
+	}
+
+	results, err := s.SearchProducts("")
+	if err != nil {
+		t.Fatalf("SearchProducts: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("want 2 results, got %d", len(results))
+	}
+	// Most recently purchased product should be first.
+	if results[0].ID != "new" {
+		t.Errorf("first result: want %q (newest), got %q", "new", results[0].ID)
+	}
+	if results[1].ID != "old" {
+		t.Errorf("second result: want %q (oldest), got %q", "old", results[1].ID)
+	}
+}
+
 func TestSearchProducts_EmptyDB_ReturnsEmptySlice(t *testing.T) {
 	s := newTestStore(t)
 	results, err := s.SearchProducts("")
