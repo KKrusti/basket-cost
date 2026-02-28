@@ -39,12 +39,22 @@ export default function App() {
     setSelectedProductId(null);
   }
 
+  function handleLogoClick() {
+    setSelectedProductId(null);
+    setActiveTab('productos');
+    setBrowserState((prev) => ({ ...prev, page: 0 }));
+  }
+
   return (
     <div className="app">
       <header className="app-header">
-        <div className="app-header__logo">
+        <button
+          className="app-header__logo"
+          onClick={handleLogoClick}
+          aria-label="Ir a la página principal"
+        >
           <AppLogo />
-        </div>
+        </button>
         <p className="app-header__subtitle">
           Consulta y compara el historial de precios de tus productos favoritos
         </p>

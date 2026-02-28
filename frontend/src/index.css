@@ -111,6 +111,10 @@ body {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
 }
 
 .app-header__logo-svg {

@@ -32,6 +32,10 @@ const mockProduct: Product = {
 
 beforeEach(() => {
   vi.mocked(productsApi.getAllProducts).mockResolvedValue([]);
+  vi.mocked(productsApi.getAnalytics).mockResolvedValue({
+    mostPurchased: [],
+    biggestIncreases: [],
+  });
 });
 
 describe('App', () => {
@@ -66,6 +70,41 @@ describe('App', () => {
     await userEvent.click(screen.getByText('LECHE ENTERA HACENDADO 1L'));
     await waitFor(() => screen.getByRole('button', { name: /back to search/i }));
     await userEvent.click(screen.getByRole('button', { name: /back to search/i }));
+    expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
+  });
+
+  it('clicking the logo navigates to the home with productos tab and resets to page 1', async () => {
+    vi.mocked(productsApi.searchProducts).mockResolvedValue(mockResults);
+    vi.mocked(productsApi.getProduct).mockResolvedValue(mockProduct);
+    render(<App />);
+
+    // Navegar a analítica
+    await userEvent.click(screen.getByRole('tab', { name: /analítica/i }));
+    expect(screen.getByRole('tab', { name: /analítica/i })).toHaveAttribute('aria-selected', 'true');
+
+    // Clickar en el logo
+    await userEvent.click(screen.getByRole('button', { name: /ir a la página principal/i }));
+
+    // Debe volver a la pestaña productos
+    expect(screen.getByRole('tab', { name: /productos/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
+  });
+
+  it('clicking the logo from ProductDetail returns to home', async () => {
+    vi.mocked(productsApi.searchProducts).mockResolvedValue(mockResults);
+    vi.mocked(productsApi.getProduct).mockResolvedValue(mockProduct);
+    render(<App />);
+
+    // Navegar a un producto
+    await userEvent.type(screen.getByRole('textbox'), 'leche');
+    await waitFor(() => screen.getByText('LECHE ENTERA HACENDADO 1L'));
+    await userEvent.click(screen.getByText('LECHE ENTERA HACENDADO 1L'));
+    await waitFor(() => screen.getByRole('button', { name: /back to search/i }));
+
+    // Clickar en el logo
+    await userEvent.click(screen.getByRole('button', { name: /ir a la página principal/i }));
+
+    // Debe volver al buscador
     expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
   });
 });
