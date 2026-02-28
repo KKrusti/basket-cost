@@ -239,6 +239,58 @@ func TestTranslateCatalan(t *testing.T) {
 			input: "",
 			want:  "",
 		},
+		// ── New dictionary entries ────────────────────────────────────────────
+		{
+			name:  "pollo pechuga",
+			input: "pollastre pit",
+			want:  "pollo pechuga",
+		},
+		{
+			name:  "pimiento rojo",
+			input: "pebrot vermell",
+			want:  "pimiento rojo",
+		},
+		{
+			name:  "lavavajillas detergente",
+			input: "rentaplats detergent",
+			want:  "lavavajillas detergente",
+		},
+		{
+			name:  "limon sin hueso",
+			input: "llimona sense pinyol",
+			// "sense" and "pinyol" map to "" → dropped
+			want: "limon",
+		},
+		{
+			name:  "cerveza lata",
+			input: "cervesa llauna",
+			want:  "cerveza lata",
+		},
+		{
+			name:  "yogur griego",
+			input: "iogurt grec",
+			want:  "yogur griego",
+		},
+		{
+			name:  "helado mini",
+			input: "gelat mini",
+			want:  "helado mini",
+		},
+		{
+			name:  "aceite oliva virgen extra",
+			input: "oli oliva verge extra",
+			want:  "aceite aceituna virgen extra",
+		},
+		{
+			name:  "champu argan",
+			input: "xampu argan",
+			want:  "champu argan",
+		},
+		{
+			name:  "detergente suavizante",
+			input: "detergent suavitzant",
+			want:  "detergente suavizante",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

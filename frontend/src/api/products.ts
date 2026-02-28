@@ -1,4 +1,4 @@
-import type { SearchResult, Product, TicketUploadResult, TicketUploadSummary } from '../types';
+import type { SearchResult, Product, TicketUploadResult, TicketUploadSummary, AnalyticsResult } from '../types';
 
 const API_BASE = '/api';
 
@@ -68,4 +68,12 @@ export async function uploadTickets(
     failed: results.filter((r) => !r.ok).length,
     items: results,
   };
+}
+
+export async function getAnalytics(): Promise<AnalyticsResult> {
+  const res = await fetch(`${API_BASE}/analytics`);
+  if (!res.ok) {
+    throw new Error(`Analytics failed: ${res.statusText}`);
+  }
+  return res.json();
 }

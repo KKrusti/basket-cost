@@ -34,6 +34,12 @@ type Store interface {
 	IsFileProcessed(filename string) (bool, error)
 	// MarkFileProcessed records filename as successfully imported at the given time.
 	MarkFileProcessed(filename string, importedAt time.Time) error
+	// GetMostPurchased returns the top N products by number of price records, descending.
+	GetMostPurchased(limit int) ([]models.MostPurchasedProduct, error)
+	// GetBiggestPriceIncreases returns the top N products by percentage price increase
+	// from their first recorded price to their latest, descending. Only products with
+	// at least 2 price records and a positive increase are included.
+	GetBiggestPriceIncreases(limit int) ([]models.PriceIncreaseProduct, error)
 }
 
 // SQLiteStore is the production Store backed by a *sql.DB.
@@ -333,4 +339,96 @@ func (s *SQLiteStore) MarkFileProcessed(filename string, importedAt time.Time) e
 		return fmt.Errorf("mark file processed %q: %w", filename, err)
 	}
 	return nil
+}
+
+// GetMostPurchased returns the top `limit` products ranked by total number of
+// price records (purchase appearances). Products with no records are excluded.
+func (s *SQLiteStore) GetMostPurchased(limit int) ([]models.MostPurchasedProduct, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			p.id,
+			p.name,
+			COALESCE(p.image_url, '') AS image_url,
+			COUNT(pr.id)              AS purchase_count,
+			COALESCE((SELECT price FROM price_records WHERE product_id = p.id ORDER BY date DESC LIMIT 1), 0) AS current_price
+		FROM products p
+		JOIN price_records pr ON pr.product_id = p.id
+		GROUP BY p.id
+		ORDER BY purchase_count DESC, p.name ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get most purchased: %w", err)
+	}
+	defer rows.Close()
+
+	var results []models.MostPurchasedProduct
+	for rows.Next() {
+		var r models.MostPurchasedProduct
+		if err := rows.Scan(&r.ID, &r.Name, &r.ImageURL, &r.PurchaseCount, &r.CurrentPrice); err != nil {
+			return nil, fmt.Errorf("scan most purchased: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate most purchased: %w", err)
+	}
+	if results == nil {
+		results = []models.MostPurchasedProduct{}
+	}
+	return results, nil
+}
+
+// GetBiggestPriceIncreases returns the top `limit` products by percentage price
+// increase from first to latest record. Only products with ≥2 records and a
+// strictly positive increase are included.
+func (s *SQLiteStore) GetBiggestPriceIncreases(limit int) ([]models.PriceIncreaseProduct, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			p.id,
+			p.name,
+			COALESCE(p.image_url, '') AS image_url,
+			first_rec.price           AS first_price,
+			last_rec.price            AS current_price,
+			ROUND(((last_rec.price - first_rec.price) / first_rec.price) * 100, 2) AS increase_pct
+		FROM products p
+		JOIN (
+			SELECT product_id, price
+			FROM price_records
+			WHERE (product_id, date) IN (
+				SELECT product_id, MIN(date) FROM price_records GROUP BY product_id
+			)
+		) first_rec ON first_rec.product_id = p.id
+		JOIN (
+			SELECT product_id, price
+			FROM price_records
+			WHERE (product_id, date) IN (
+				SELECT product_id, MAX(date) FROM price_records GROUP BY product_id
+			)
+		) last_rec ON last_rec.product_id = p.id
+		WHERE last_rec.price > first_rec.price
+		  AND (SELECT COUNT(*) FROM price_records WHERE product_id = p.id) >= 2
+		ORDER BY increase_pct DESC, p.name ASC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("get biggest price increases: %w", err)
+	}
+	defer rows.Close()
+
+	var results []models.PriceIncreaseProduct
+	for rows.Next() {
+		var r models.PriceIncreaseProduct
+		if err := rows.Scan(&r.ID, &r.Name, &r.ImageURL, &r.FirstPrice, &r.CurrentPrice, &r.IncreasePercent); err != nil {
+			return nil, fmt.Errorf("scan biggest price increases: %w", err)
+		}
+		results = append(results, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate biggest price increases: %w", err)
+	}
+	if results == nil {
+		results = []models.PriceIncreaseProduct{}
+	}
+	return results, nil
 }

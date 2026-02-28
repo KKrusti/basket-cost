@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -675,5 +676,270 @@ func TestGetProductsWithoutImage_EmptyStore(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("expected empty slice on empty store, got %d", len(got))
+	}
+}
+
+// ---------- GetMostPurchased ----------
+
+func TestGetMostPurchased_RankedByPurchaseCount(t *testing.T) {
+	s := newTestStore(t)
+
+	// leche: 3 records, pan: 1 record.
+	leche := models.Product{
+		ID:   "leche",
+		Name: "LECHE ENTERA",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 0.79, Store: "Mercadona"},
+			{Date: date(2025, 6, 1), Price: 0.85, Store: "Mercadona"},
+			{Date: date(2026, 1, 1), Price: 0.89, Store: "Mercadona"},
+		},
+	}
+	pan := models.Product{
+		ID:   "pan",
+		Name: "PAN INTEGRAL",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 1.25, Store: "Mercadona"},
+		},
+	}
+	if err := s.InsertProduct(leche); err != nil {
+		t.Fatalf("insert leche: %v", err)
+	}
+	if err := s.InsertProduct(pan); err != nil {
+		t.Fatalf("insert pan: %v", err)
+	}
+
+	got, err := s.GetMostPurchased(10)
+	if err != nil {
+		t.Fatalf("GetMostPurchased: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 results, got %d", len(got))
+	}
+	if got[0].ID != "leche" {
+		t.Errorf("first: want %q (3 purchases), got %q", "leche", got[0].ID)
+	}
+	if got[0].PurchaseCount != 3 {
+		t.Errorf("leche PurchaseCount: want 3, got %d", got[0].PurchaseCount)
+	}
+	if got[1].ID != "pan" {
+		t.Errorf("second: want %q (1 purchase), got %q", "pan", got[1].ID)
+	}
+}
+
+func TestGetMostPurchased_RespectsLimit(t *testing.T) {
+	s := newTestStore(t)
+
+	for i, name := range []string{"LECHE ENTERA", "PAN INTEGRAL", "YOGUR NATURAL"} {
+		p := models.Product{
+			ID:   fmt.Sprintf("p%d", i),
+			Name: name,
+			PriceHistory: []models.PriceRecord{
+				{Date: date(2025, 1, i+1), Price: 1.00, Store: "Mercadona"},
+			},
+		}
+		if err := s.InsertProduct(p); err != nil {
+			t.Fatalf("insert %s: %v", name, err)
+		}
+	}
+
+	got, err := s.GetMostPurchased(2)
+	if err != nil {
+		t.Fatalf("GetMostPurchased: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("want 2 results (limit respected), got %d", len(got))
+	}
+}
+
+func TestGetMostPurchased_EmptyDB_ReturnsEmptySlice(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetMostPurchased(10)
+	if err != nil {
+		t.Fatalf("GetMostPurchased: %v", err)
+	}
+	if got == nil {
+		t.Error("want empty slice, got nil")
+	}
+	if len(got) != 0 {
+		t.Errorf("want 0 results, got %d", len(got))
+	}
+}
+
+func TestGetMostPurchased_CurrentPriceIsLatest(t *testing.T) {
+	s := newTestStore(t)
+	p := models.Product{
+		ID:   "precio",
+		Name: "ACEITE OLIVA",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 4.00, Store: "Mercadona"},
+			{Date: date(2026, 1, 1), Price: 5.50, Store: "Mercadona"},
+		},
+	}
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := s.GetMostPurchased(10)
+	if err != nil {
+		t.Fatalf("GetMostPurchased: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1, got %d", len(got))
+	}
+	if got[0].CurrentPrice != 5.50 {
+		t.Errorf("CurrentPrice: want 5.50, got %f", got[0].CurrentPrice)
+	}
+}
+
+// ---------- GetBiggestPriceIncreases ----------
+
+func TestGetBiggestPriceIncreases_RankedByPercent(t *testing.T) {
+	s := newTestStore(t)
+
+	// aceite: +100% (2 → 4), leche: +12.5% (0.80 → 0.90)
+	aceite := models.Product{
+		ID:   "aceite",
+		Name: "ACEITE OLIVA",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 2.00, Store: "Mercadona"},
+			{Date: date(2026, 1, 1), Price: 4.00, Store: "Mercadona"},
+		},
+	}
+	leche := models.Product{
+		ID:   "leche2",
+		Name: "LECHE ENTERA",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 0.80, Store: "Mercadona"},
+			{Date: date(2026, 1, 1), Price: 0.90, Store: "Mercadona"},
+		},
+	}
+	if err := s.InsertProduct(aceite); err != nil {
+		t.Fatalf("insert aceite: %v", err)
+	}
+	if err := s.InsertProduct(leche); err != nil {
+		t.Fatalf("insert leche: %v", err)
+	}
+
+	got, err := s.GetBiggestPriceIncreases(10)
+	if err != nil {
+		t.Fatalf("GetBiggestPriceIncreases: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2, got %d", len(got))
+	}
+	if got[0].ID != "aceite" {
+		t.Errorf("first: want %q (+100%%), got %q", "aceite", got[0].ID)
+	}
+	if got[0].IncreasePercent != 100.0 {
+		t.Errorf("aceite IncreasePercent: want 100, got %f", got[0].IncreasePercent)
+	}
+}
+
+func TestGetBiggestPriceIncreases_ExcludesDecreases(t *testing.T) {
+	s := newTestStore(t)
+
+	// precio bajó
+	p := models.Product{
+		ID:   "pan",
+		Name: "PAN INTEGRAL",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 2.00, Store: "Mercadona"},
+			{Date: date(2026, 1, 1), Price: 1.50, Store: "Mercadona"},
+		},
+	}
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := s.GetBiggestPriceIncreases(10)
+	if err != nil {
+		t.Fatalf("GetBiggestPriceIncreases: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want 0 (decrease excluded), got %d", len(got))
+	}
+}
+
+func TestGetBiggestPriceIncreases_ExcludesSingleRecord(t *testing.T) {
+	s := newTestStore(t)
+
+	p := models.Product{
+		ID:   "one",
+		Name: "UN SOLO PRECIO",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 1.00, Store: "Mercadona"},
+		},
+	}
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := s.GetBiggestPriceIncreases(10)
+	if err != nil {
+		t.Fatalf("GetBiggestPriceIncreases: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want 0 (single record excluded), got %d", len(got))
+	}
+}
+
+func TestGetBiggestPriceIncreases_FieldsPopulated(t *testing.T) {
+	s := newTestStore(t)
+
+	p := models.Product{
+		ID:   "yogur",
+		Name: "YOGUR NATURAL",
+		PriceHistory: []models.PriceRecord{
+			{Date: date(2025, 1, 1), Price: 0.40, Store: "Mercadona"},
+			{Date: date(2026, 1, 1), Price: 0.60, Store: "Mercadona"},
+		},
+	}
+	if err := s.InsertProduct(p); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	got, err := s.GetBiggestPriceIncreases(10)
+	if err != nil {
+		t.Fatalf("GetBiggestPriceIncreases: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1, got %d", len(got))
+	}
+	r := got[0]
+	if r.FirstPrice != 0.40 {
+		t.Errorf("FirstPrice: want 0.40, got %f", r.FirstPrice)
+	}
+	if r.CurrentPrice != 0.60 {
+		t.Errorf("CurrentPrice: want 0.60, got %f", r.CurrentPrice)
+	}
+	if r.IncreasePercent != 50.0 {
+		t.Errorf("IncreasePercent: want 50.0, got %f", r.IncreasePercent)
+	}
+}
+
+func TestGetBiggestPriceIncreases_RespectsLimit(t *testing.T) {
+	s := newTestStore(t)
+
+	for i, name := range []string{"PROD A", "PROD B", "PROD C"} {
+		price := float64(i+1) * 1.0
+		p := models.Product{
+			ID:   fmt.Sprintf("prod%d", i),
+			Name: name,
+			PriceHistory: []models.PriceRecord{
+				{Date: date(2025, 1, 1), Price: price, Store: "Mercadona"},
+				{Date: date(2026, 1, 1), Price: price * 2, Store: "Mercadona"},
+			},
+		}
+		if err := s.InsertProduct(p); err != nil {
+			t.Fatalf("insert %s: %v", name, err)
+		}
+	}
+
+	got, err := s.GetBiggestPriceIncreases(2)
+	if err != nil {
+		t.Fatalf("GetBiggestPriceIncreases: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("want 2 (limit respected), got %d", len(got))
 	}
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { searchProducts, getAllProducts, getProduct, uploadTicket, uploadTickets } from './products';
-import type { SearchResult, Product } from '../types';
+import { searchProducts, getAllProducts, getProduct, uploadTicket, uploadTickets, getAnalytics } from './products';
+import type { SearchResult, Product, AnalyticsResult } from '../types';
 
 const mockSearchResults: SearchResult[] = [
   { id: '1', name: 'LECHE ENTERA HACENDADO 1L', category: 'Lácteos', currentPrice: 0.89, minPrice: 0.79, maxPrice: 0.89 },
@@ -278,5 +278,46 @@ describe('uploadTickets', () => {
 
     expect(onProgress).toHaveBeenCalledTimes(1);
     expect(onProgress).toHaveBeenCalledWith(1, 1);
+  });
+});
+
+describe('getAnalytics', () => {
+  const mockAnalytics: AnalyticsResult = {
+    mostPurchased: [
+      { id: 'leche-entera', name: 'LECHE ENTERA', purchaseCount: 5, currentPrice: 0.89 },
+    ],
+    biggestIncreases: [
+      { id: 'aceite-oliva', name: 'ACEITE OLIVA', increasePercent: 42.5, firstPrice: 4.0, currentPrice: 5.7 },
+    ],
+  };
+
+  it('returns analytics data when the response is OK', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockAnalytics),
+    }));
+
+    const result = await getAnalytics();
+    expect(result).toEqual(mockAnalytics);
+  });
+
+  it('calls GET /api/analytics', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockAnalytics),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getAnalytics();
+    expect(fetchMock).toHaveBeenCalledWith('/api/analytics');
+  });
+
+  it('throws an Error when the response is not OK', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      statusText: 'Internal Server Error',
+    }));
+
+    await expect(getAnalytics()).rejects.toThrow('Analytics failed: Internal Server Error');
   });
 });

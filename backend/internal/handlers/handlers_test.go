@@ -489,3 +489,85 @@ func TestTicketHandler_FileMarkedProcessedAfterSuccessfulImport(t *testing.T) {
 		t.Error("expected 'ticket.pdf' to be marked as processed after successful import")
 	}
 }
+
+// --- AnalyticsHandler ---
+
+func TestAnalyticsHandler_MethodNotAllowed(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/analytics", nil)
+	w := httptest.NewRecorder()
+	h.AnalyticsHandler(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestAnalyticsHandler_ReturnsOK(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/analytics", nil)
+	w := httptest.NewRecorder()
+	h.AnalyticsHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAnalyticsHandler_ContentTypeJSON(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/analytics", nil)
+	w := httptest.NewRecorder()
+	h.AnalyticsHandler(w, req)
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("expected Content-Type 'application/json', got %q", ct)
+	}
+}
+
+func TestAnalyticsHandler_ResponseShape(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/analytics", nil)
+	w := httptest.NewRecorder()
+	h.AnalyticsHandler(w, req)
+
+	var resp struct {
+		MostPurchased    []json.RawMessage `json:"mostPurchased"`
+		BiggestIncreases []json.RawMessage `json:"biggestIncreases"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode analytics response: %v", err)
+	}
+	// Both arrays must be non-nil (may be empty, but not null).
+	if resp.MostPurchased == nil {
+		t.Error("mostPurchased must not be null")
+	}
+	if resp.BiggestIncreases == nil {
+		t.Error("biggestIncreases must not be null")
+	}
+}
+
+func TestAnalyticsHandler_MostPurchasedPopulated(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/analytics", nil)
+	w := httptest.NewRecorder()
+	h.AnalyticsHandler(w, req)
+
+	var resp struct {
+		MostPurchased []struct {
+			ID            string  `json:"id"`
+			Name          string  `json:"name"`
+			PurchaseCount int     `json:"purchaseCount"`
+			CurrentPrice  float64 `json:"currentPrice"`
+		} `json:"mostPurchased"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// newHandlers seeds 2 products with 2 price records each.
+	if len(resp.MostPurchased) == 0 {
+		t.Error("expected at least one entry in mostPurchased")
+	}
+	for _, item := range resp.MostPurchased {
+		if item.PurchaseCount <= 0 {
+			t.Errorf("product %q: PurchaseCount should be > 0, got %d", item.ID, item.PurchaseCount)
+		}
+	}
+}

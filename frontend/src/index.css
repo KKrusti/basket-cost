@@ -1068,6 +1068,241 @@ body {
   height: 14px;
 }
 
+/* ─── App Tabs ───────────────────────────────────────────── */
+.app-tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1.5px solid var(--color-border);
+  margin-bottom: 0.875rem;
+  padding: 0 0.125rem;
+}
+
+.app-tabs__tab {
+  position: relative;
+  padding: 0.5rem 1rem;
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  cursor: pointer;
+  transition: color var(--transition-base), background var(--transition-base);
+  white-space: nowrap;
+  min-height: 44px;
+}
+
+.app-tabs__tab::after {
+  content: '';
+  position: absolute;
+  bottom: -1.5px;
+  left: 0;
+  right: 0;
+  height: 2.5px;
+  background: transparent;
+  border-radius: 2px 2px 0 0;
+  transition: background var(--transition-base);
+}
+
+.app-tabs__tab:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.app-tabs__tab--active {
+  color: var(--color-primary-dark);
+  font-weight: 700;
+}
+
+.app-tabs__tab--active::after {
+  background: var(--color-primary);
+}
+
+.app-tabs__tab:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ─── Analytics ──────────────────────────────────────────── */
+.analytics {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-top: 0.25rem;
+}
+
+.analytics__section {
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.analytics__section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem 0.75rem;
+  border-bottom: 1.5px solid var(--color-border);
+  background: var(--color-bg-alt);
+}
+
+.analytics__section-icon {
+  display: flex;
+  align-items: center;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.analytics__section-title {
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+.analytics__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.analytics__empty {
+  padding: 1.5rem 1rem;
+  text-align: center;
+  color: var(--color-text-subtle);
+  font-size: 0.9rem;
+}
+
+.analytics__error {
+  padding: 1.5rem 1rem;
+  color: #b91c1c;
+  background: #fff5f5;
+  border: 1.5px solid #fca5a5;
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+/* Loading skeleton for analytics */
+.analytics__loading {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.analytics__skeleton-card {
+  height: 280px;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-lg);
+}
+
+/* Analytics row */
+.analytics-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+  transition: background var(--transition-base);
+  min-height: 44px;
+}
+
+.analytics-row:last-child {
+  border-bottom: none;
+}
+
+.analytics-row:hover {
+  background: var(--color-surface-hover);
+}
+
+.analytics-row:focus-visible {
+  outline: 3px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.analytics-row__rank {
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-text-subtle);
+  min-width: 1.25rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.analytics-row__name {
+  flex: 1;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analytics-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.analytics-row__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.analytics-row__badge--count {
+  background: var(--color-badge-bg);
+  color: var(--color-badge-text);
+}
+
+.analytics-row__badge--increase {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.analytics-row__price {
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-price);
+  white-space: nowrap;
+}
+
+.analytics-row__price-range {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-family: 'Rubik', sans-serif;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.analytics-row__arrow {
+  color: var(--color-text-subtle);
+  font-size: 0.75rem;
+}
+
 /* ─── prefers-reduced-motion ─────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

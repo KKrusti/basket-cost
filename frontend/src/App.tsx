@@ -2,7 +2,10 @@ import { useState } from 'react';
 import SearchBar from './components/SearchBar';
 import ProductDetail from './components/ProductDetail';
 import TicketUploader from './components/TicketUploader';
+import Analytics from './components/Analytics';
 import type { ProductBrowserState } from './components/ProductBrowser';
+
+type Tab = 'productos' | 'analitica';
 
 function AppLogo() {
   return (
@@ -21,11 +24,20 @@ function AppLogo() {
 
 export default function App() {
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>('productos');
   const [browserState, setBrowserState] = useState<ProductBrowserState>({
     page: 0,
     pageSize: 48,
     columns: 3,
   });
+
+  function handleSelectProduct(id: string) {
+    setSelectedProductId(id);
+  }
+
+  function handleBack() {
+    setSelectedProductId(null);
+  }
 
   return (
     <div className="app">
@@ -41,20 +53,66 @@ export default function App() {
         </div>
       </header>
 
-      <div className="app-content">
-        {selectedProductId ? (
+      {selectedProductId ? (
+        <div className="app-content">
           <ProductDetail
             productId={selectedProductId}
-            onBack={() => setSelectedProductId(null)}
+            onBack={handleBack}
           />
-        ) : (
-          <SearchBar
-            onSelectProduct={setSelectedProductId}
-            browserState={browserState}
-            onBrowserStateChange={setBrowserState}
-          />
-        )}
-      </div>
+        </div>
+      ) : (
+        <>
+          <nav className="app-tabs" role="tablist" aria-label="Secciones de la aplicación">
+            <button
+              role="tab"
+              aria-selected={activeTab === 'productos'}
+              aria-controls="tab-panel-productos"
+              id="tab-productos"
+              className={`app-tabs__tab${activeTab === 'productos' ? ' app-tabs__tab--active' : ''}`}
+              onClick={() => setActiveTab('productos')}
+            >
+              Productos
+            </button>
+            <button
+              role="tab"
+              aria-selected={activeTab === 'analitica'}
+              aria-controls="tab-panel-analitica"
+              id="tab-analitica"
+              className={`app-tabs__tab${activeTab === 'analitica' ? ' app-tabs__tab--active' : ''}`}
+              onClick={() => setActiveTab('analitica')}
+            >
+              Analítica
+            </button>
+          </nav>
+
+          <div className="app-content">
+            <div
+              role="tabpanel"
+              id="tab-panel-productos"
+              aria-labelledby="tab-productos"
+              hidden={activeTab !== 'productos'}
+            >
+              {activeTab === 'productos' && (
+                <SearchBar
+                  onSelectProduct={handleSelectProduct}
+                  browserState={browserState}
+                  onBrowserStateChange={setBrowserState}
+                />
+              )}
+            </div>
+            <div
+              role="tabpanel"
+              id="tab-panel-analitica"
+              aria-labelledby="tab-analitica"
+              hidden={activeTab !== 'analitica'}
+            >
+              {activeTab === 'analitica' && (
+                <Analytics onSelectProduct={handleSelectProduct} />
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

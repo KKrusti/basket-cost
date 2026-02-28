@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"basket-cost/internal/models"
 	"basket-cost/internal/store"
 	"basket-cost/internal/ticket"
 	"bytes"
@@ -91,6 +92,12 @@ type ticketResponse struct {
 	LinesImported int    `json:"linesImported"`
 }
 
+// analyticsResponse is the JSON body returned by AnalyticsHandler.
+type analyticsResponse struct {
+	MostPurchased    []models.MostPurchasedProduct `json:"mostPurchased"`
+	BiggestIncreases []models.PriceIncreaseProduct `json:"biggestIncreases"`
+}
+
 // TicketHandler handles POST /api/tickets
 // Accepts a multipart/form-data request with a "file" field containing a PDF.
 // It parses the receipt and persists the extracted price data.
@@ -160,5 +167,39 @@ func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 	// so a batch of ticket uploads triggers only one enrichment run.
 	if h.enricher != nil {
 		h.enricher.Schedule()
+	}
+}
+
+// analyticsLimit is the maximum number of rows returned per analytics ranking.
+const analyticsLimit = 10
+
+// AnalyticsHandler handles GET /api/analytics
+// Returns the most-purchased products and the biggest price increases.
+func (h *Handlers) AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	mostPurchased, err := h.store.GetMostPurchased(analyticsLimit)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	biggestIncreases, err := h.store.GetBiggestPriceIncreases(analyticsLimit)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	resp := analyticsResponse{
+		MostPurchased:    mostPurchased,
+		BiggestIncreases: biggestIncreases,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("handlers: encode analytics response: %v", err)
 	}
 }

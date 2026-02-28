@@ -51,6 +51,9 @@ func main() {
 	// POST /api/tickets — upload a Mercadona PDF receipt
 	mux.HandleFunc("/api/tickets", corsMiddleware(h.TicketHandler))
 
+	// GET /api/analytics — analytics data (most purchased, biggest price increases)
+	mux.HandleFunc("/api/analytics", corsMiddleware(h.AnalyticsHandler))
+
 	port := ":8080"
 	fmt.Printf("Basket Cost API server running on http://localhost%s\n", port)
 	log.Fatal(http.ListenAndServe(port, mux))

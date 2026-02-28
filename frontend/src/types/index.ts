@@ -39,3 +39,25 @@ export interface TicketUploadSummary {
   failed: number;
   items: TicketUploadItem[];
 }
+
+export interface MostPurchasedProduct {
+  id: string;
+  name: string;
+  imageUrl?: string;
+  purchaseCount: number;
+  currentPrice: number;
+}
+
+export interface PriceIncreaseProduct {
+  id: string;
+  name: string;
+  imageUrl?: string;
+  firstPrice: number;
+  currentPrice: number;
+  increasePercent: number;
+}
+
+export interface AnalyticsResult {
+  mostPurchased: MostPurchasedProduct[];
+  biggestIncreases: PriceIncreaseProduct[];
+}

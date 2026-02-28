@@ -38,3 +38,30 @@ type PriceRecordEntry struct {
 	Name   string
 	Record PriceRecord
 }
+
+// MostPurchasedProduct is a row in the "most purchased products" analytics ranking.
+// PurchaseCount reflects the total number of price records (i.e. ticket lines) for the product.
+type MostPurchasedProduct struct {
+	ID            string  `json:"id"`
+	Name          string  `json:"name"`
+	ImageURL      string  `json:"imageUrl,omitempty"`
+	PurchaseCount int     `json:"purchaseCount"`
+	CurrentPrice  float64 `json:"currentPrice"`
+}
+
+// PriceIncreaseProduct is a row in the "highest price increase" analytics ranking.
+// IncreasePercent is ((currentPrice - firstPrice) / firstPrice) * 100.
+type PriceIncreaseProduct struct {
+	ID              string  `json:"id"`
+	Name            string  `json:"name"`
+	ImageURL        string  `json:"imageUrl,omitempty"`
+	FirstPrice      float64 `json:"firstPrice"`
+	CurrentPrice    float64 `json:"currentPrice"`
+	IncreasePercent float64 `json:"increasePercent"`
+}
+
+// AnalyticsResult is the top-level response body for GET /api/analytics.
+type AnalyticsResult struct {
+	MostPurchased    []MostPurchasedProduct `json:"mostPurchased"`
+	BiggestIncreases []PriceIncreaseProduct `json:"biggestIncreases"`
+}
