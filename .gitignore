@@ -16,3 +16,16 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# Dolt database files (added by bd init)
+.dolt/
+
+# Bases de datos SQLite (nunca deben commitearse — contienen datos personales)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+# Binarios compilados del backend
+/backend/server
+/backend/bin/server

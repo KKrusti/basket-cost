@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -17,6 +18,8 @@ import (
 	"basket-cost/internal/models"
 	"basket-cost/internal/store"
 	"basket-cost/internal/ticket"
+
+	"golang.org/x/time/rate"
 )
 
 // newHandlers creates a Handlers instance backed by an in-memory SQLite DB
@@ -346,6 +349,23 @@ func TestTicketHandler_ValidPDF_ResponseJSON(t *testing.T) {
 	}
 }
 
+func TestTicketHandler_NonPDFMagicBytes_ReturnsUnprocessable(t *testing.T) {
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{},
+		&fakeTicketParser{},
+		store.New(mustOpenMemDB(t)),
+	)
+	h := newHandlersWithImporter(t, imp)
+	// Archivo que no comienza con "%PDF-" — debe ser rechazado con 422 antes de
+	// llegar al extractor.
+	req := buildMultipartRequest(t, []byte("not a pdf"))
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("expected 422, got %d", w.Code)
+	}
+}
+
 func TestTicketHandler_ImporterError_ReturnsUnprocessable(t *testing.T) {
 	imp := ticket.NewImporter(
 		&fakeTicketExtractor{err: errors.New("corrupt pdf")},
@@ -353,11 +373,43 @@ func TestTicketHandler_ImporterError_ReturnsUnprocessable(t *testing.T) {
 		store.New(mustOpenMemDB(t)),
 	)
 	h := newHandlersWithImporter(t, imp)
-	req := buildMultipartRequest(t, []byte("not a pdf"))
+	// El archivo comienza con "%PDF-" pero el extractor fallará internamente.
+	req := buildMultipartRequest(t, []byte("%PDF-1.4 corrupt content"))
 	w := httptest.NewRecorder()
 	h.TicketHandler(w, req)
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("expected 422, got %d", w.Code)
+	}
+}
+
+func TestTicketHandler_RateLimitExceeded_ReturnsTooManyRequests(t *testing.T) {
+	db := mustOpenMemDB(t)
+	imp := ticket.NewImporter(
+		&fakeTicketExtractor{text: "raw text"},
+		&fakeTicketParser{t: sampleImportTicket()},
+		store.New(db),
+	)
+
+	// Creamos un limiter ya exhausto (burst 0) para que el primer request sea rechazado.
+	exhaustedLimiter := rate.NewLimiter(rate.Every(time.Hour), 0)
+	h := handlers.NewWithLimiter(store.New(mustOpenMemDB(t)), imp, nil, exhaustedLimiter)
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", fmt.Sprintf("ticket-%d.pdf", 1))
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write([]byte("%PDF-1.4 fake")); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/tickets", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	w := httptest.NewRecorder()
+	h.TicketHandler(w, req)
+	if w.Code != http.StatusTooManyRequests {
+		t.Errorf("expected 429 Too Many Requests, got %d", w.Code)
 	}
 }
 

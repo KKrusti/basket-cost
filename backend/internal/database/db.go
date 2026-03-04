@@ -4,21 +4,20 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"os"
 
 	_ "modernc.org/sqlite"
 )
 
-// Open opens (or creates) the SQLite database at the given path,
-// applies performance PRAGMAs, and runs all schema migrations.
-// Pass ":memory:" for an in-memory database (useful in tests).
+// Open opens (or creates) the SQLite database at path, applies PRAGMAs, and
+// runs all schema migrations. Pass ":memory:" for an in-memory database.
 func Open(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// SQLite is not safe for concurrent writes from multiple connections;
-	// a single connection avoids locking issues without a connection pool.
+	// Single connection prevents WAL write contention.
 	db.SetMaxOpenConns(1)
 
 	if err := applyPragmas(db); err != nil {
@@ -31,10 +30,17 @@ func Open(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	// Restrict on-disk DB to owner-only access (0600).
+	// Skipped for ":memory:" and on filesystems that do not support chmod.
+	if path != ":memory:" {
+		if err := os.Chmod(path, 0600); err != nil {
+			fmt.Printf("database: could not set permissions on %q: %v\n", path, err)
+		}
+	}
+
 	return db, nil
 }
 
-// applyPragmas configures performance and integrity settings.
 func applyPragmas(db *sql.DB) error {
 	pragmas := `
 		PRAGMA foreign_keys  = ON;
@@ -49,10 +55,9 @@ func applyPragmas(db *sql.DB) error {
 	return nil
 }
 
-// migrate creates all required tables if they do not exist.
-// Add new migrations as numbered steps below; never alter existing ones.
+// migrate creates all required tables. Add new migrations as numbered steps;
+// never alter or remove existing ones.
 func migrate(db *sql.DB) error {
-	// Migration 1: base schema.
 	m1 := `
 		CREATE TABLE IF NOT EXISTS products (
 			id       TEXT PRIMARY KEY,
@@ -75,8 +80,7 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("migrate m1: %w", err)
 	}
 
-	// Migration 2: add image_url column (idempotent via ALTER TABLE IF NOT EXISTS column pattern).
-	// SQLite does not support IF NOT EXISTS for ADD COLUMN, so we check the column first.
+	// SQLite does not support IF NOT EXISTS for ADD COLUMN, so check first.
 	var colCount int
 	err := db.QueryRow(
 		`SELECT COUNT(*) FROM pragma_table_info('products') WHERE name='image_url'`,
@@ -90,7 +94,6 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
-	// Migration 3: track processed PDF filenames to prevent duplicate imports.
 	m3 := `
 		CREATE TABLE IF NOT EXISTS processed_files (
 			filename    TEXT PRIMARY KEY,

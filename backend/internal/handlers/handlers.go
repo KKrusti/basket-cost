@@ -11,39 +11,48 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
-// EnrichScheduler is the subset of *enricher.Enricher consumed by Handlers.
-// Declaring it as an interface allows tests to inject a fake without network calls.
-// Schedule signals the background enrichment worker to run once; concurrent
-// calls are coalesced so the Mercadona API is not spammed.
+const pdfMagic = "%PDF-"
+
+// EnrichScheduler is the subset of *enricher.Enricher used by Handlers.
+// Defined as an interface so tests can inject a fake without network calls.
 type EnrichScheduler interface {
 	Schedule()
 }
 
-// Handlers holds the shared dependencies injected at startup.
 type Handlers struct {
-	store    store.Store
-	importer *ticket.Importer
-	enricher EnrichScheduler
+	store         store.Store
+	importer      *ticket.Importer
+	enricher      EnrichScheduler
+	ticketLimiter *rate.Limiter
 }
 
-// New returns a Handlers instance wired to the given Store, Importer and EnrichScheduler.
-// enr may be nil, in which case automatic enrichment after ticket import is skipped.
+// New returns a Handlers instance. enr may be nil to skip post-import enrichment.
 func New(s store.Store, imp *ticket.Importer, enr EnrichScheduler) *Handlers {
-	return &Handlers{store: s, importer: imp, enricher: enr}
+	return &Handlers{
+		store:         s,
+		importer:      imp,
+		enricher:      enr,
+		ticketLimiter: rate.NewLimiter(rate.Every(200*time.Millisecond), 10),
+	}
 }
 
-// SearchHandler handles GET /api/products?q=<query>
-// Returns a list of products matching the search query.
+// NewWithLimiter creates a Handlers instance with a custom rate limiter.
+// Intended for testing; production code should use New.
+func NewWithLimiter(s store.Store, imp *ticket.Importer, enr EnrichScheduler, lim *rate.Limiter) *Handlers {
+	return &Handlers{store: s, importer: imp, enricher: enr, ticketLimiter: lim}
+}
+
 func (h *Handlers) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	query := r.URL.Query().Get("q")
-	results, err := h.store.SearchProducts(query)
+	results, err := h.store.SearchProducts(r.URL.Query().Get("q"))
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -55,15 +64,12 @@ func (h *Handlers) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ProductHandler handles GET /api/products/<id>
-// Returns full product details including price history.
 func (h *Handlers) ProductHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Extract ID from path: /api/products/123
 	id := r.URL.Path[len("/api/products/"):]
 	if id == "" {
 		http.Error(w, "Product ID required", http.StatusBadRequest)
@@ -86,30 +92,27 @@ func (h *Handlers) ProductHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ticketResponse is the JSON body returned by TicketHandler on success.
 type ticketResponse struct {
 	InvoiceNumber string `json:"invoiceNumber"`
 	LinesImported int    `json:"linesImported"`
 }
 
-// analyticsResponse is the JSON body returned by AnalyticsHandler.
 type analyticsResponse struct {
 	MostPurchased    []models.MostPurchasedProduct `json:"mostPurchased"`
 	BiggestIncreases []models.PriceIncreaseProduct `json:"biggestIncreases"`
 }
 
-// TicketHandler handles POST /api/tickets
-// Accepts a multipart/form-data request with a "file" field containing a PDF.
-// It parses the receipt and persists the extracted price data.
-// On success it triggers a background enrichment pass to update product image URLs.
-// If the filename has already been imported a 409 Conflict is returned.
 func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// Limit upload to 10 MB to guard against oversized payloads.
+	if !h.ticketLimiter.Allow() {
+		http.Error(w, "Too many requests", http.StatusTooManyRequests)
+		return
+	}
+
 	const maxUploadSize = 10 << 20
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		http.Error(w, "Bad request: could not parse form", http.StatusBadRequest)
@@ -125,7 +128,6 @@ func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 
 	filename := header.Filename
 
-	// Reject files that have already been imported.
 	already, err := h.store.IsFileProcessed(filename)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -142,15 +144,21 @@ func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.importer.Import(bytes.NewReader(data), int64(len(data)))
-	if err != nil {
-		http.Error(w, "Unprocessable entity: "+err.Error(), http.StatusUnprocessableEntity)
+	// Validate PDF magic bytes before invoking the parser to reject non-PDF uploads early.
+	if len(data) < len(pdfMagic) || string(data[:len(pdfMagic)]) != pdfMagic {
+		http.Error(w, "Unprocessable entity: file does not appear to be a valid PDF", http.StatusUnprocessableEntity)
 		return
 	}
 
-	// Record the file as processed so future uploads of the same name are rejected.
+	result, err := h.importer.Import(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		log.Printf("handlers: ticket import failed for %q: %v", filename, err)
+		http.Error(w, "Unprocessable entity: could not parse the PDF as a Mercadona receipt", http.StatusUnprocessableEntity)
+		return
+	}
+
 	if err := h.store.MarkFileProcessed(filename, time.Now()); err != nil {
-		// Non-fatal: log and continue — the import succeeded.
+		// Non-fatal: the import succeeded; log and continue.
 		log.Printf("handlers: could not mark file processed %q: %v", filename, err)
 	}
 
@@ -163,18 +171,15 @@ func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("handlers: encode ticket response: %v", err)
 	}
 
-	// Signal the background enricher worker. Concurrent signals are coalesced
-	// so a batch of ticket uploads triggers only one enrichment run.
+	// Concurrent Schedule calls are coalesced by the enricher, so batch uploads
+	// trigger only one enrichment run.
 	if h.enricher != nil {
 		h.enricher.Schedule()
 	}
 }
 
-// analyticsLimit is the maximum number of rows returned per analytics ranking.
 const analyticsLimit = 10
 
-// AnalyticsHandler handles GET /api/analytics
-// Returns the most-purchased products and the biggest price increases.
 func (h *Handlers) AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -193,13 +198,11 @@ func (h *Handlers) AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := analyticsResponse{
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(analyticsResponse{
 		MostPurchased:    mostPurchased,
 		BiggestIncreases: biggestIncreases,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	}); err != nil {
 		log.Printf("handlers: encode analytics response: %v", err)
 	}
 }

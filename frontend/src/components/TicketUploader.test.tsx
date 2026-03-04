@@ -188,14 +188,15 @@ describe('TicketUploader', () => {
     expect(screen.getByRole('button', { name: /subir tickets/i })).not.toBeDisabled();
   });
 
-  it('shows "Ya importado" when the server returns a duplicate-file error', async () => {
+  it('shows a friendly duplicate-file error message when the server returns a 409', async () => {
+    // El mensaje amigable ya viene traducido desde api/products.ts (friendlyUploadError)
     const duplicateSummary: TicketUploadSummary = {
       total: 2,
       succeeded: 1,
       failed: 1,
       items: [
         { file: 'nuevo.pdf', ok: true, result: { invoiceNumber: 'N1', linesImported: 4 } },
-        { file: 'viejo.pdf', ok: false, error: 'Conflict: file already imported' },
+        { file: 'viejo.pdf', ok: false, error: 'Este ticket ya fue importado anteriormente' },
       ],
     };
     vi.mocked(productsApi.uploadTickets).mockResolvedValue(duplicateSummary);
@@ -211,6 +212,6 @@ describe('TicketUploader', () => {
 
     await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
 
-    expect(screen.getByText(/ya importado/i)).toBeInTheDocument();
+    expect(screen.getByText(/este ticket ya fue importado anteriormente/i)).toBeInTheDocument();
   });
 });
