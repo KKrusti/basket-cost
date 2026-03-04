@@ -40,7 +40,10 @@ describe('searchProducts', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await searchProducts('aceite oliva');
-    expect(fetchMock).toHaveBeenCalledWith('/api/products?q=aceite%20oliva');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/products?q=aceite%20oliva',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('throws an Error when the response is not OK', async () => {
@@ -72,7 +75,10 @@ describe('getAllProducts', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await getAllProducts();
-    expect(fetchMock).toHaveBeenCalledWith('/api/products?q=');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/products?q=',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('returns all products from the response', async () => {
@@ -106,7 +112,7 @@ describe('getProduct', () => {
     expect(product).toEqual(mockProduct);
   });
 
-  it('calls the correct endpoint with the ID', async () => {
+  it('calls the correct endpoint with the encoded ID', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(mockProduct),
@@ -114,7 +120,24 @@ describe('getProduct', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await getProduct('42');
-    expect(fetchMock).toHaveBeenCalledWith('/api/products/42');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/products/42',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('encodes special characters in the product ID', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockProduct),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getProduct('leche entera');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/products/leche%20entera',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('throws an Error when the product is not found', async () => {
@@ -139,7 +162,7 @@ describe('uploadTicket', () => {
     expect(result).toEqual({ invoiceNumber: '1234', linesImported: 5 });
   });
 
-  it('calls POST /api/tickets with multipart form data', async () => {
+  it('calls POST /api/tickets with multipart form data and X-Requested-With header', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ invoiceNumber: 'X', linesImported: 1 }),
@@ -151,22 +174,28 @@ describe('uploadTicket', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/tickets',
-      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.any(FormData),
+        headers: expect.objectContaining({ 'X-Requested-With': 'XMLHttpRequest' }),
+        signal: expect.any(AbortSignal),
+      }),
     );
   });
 
-  it('throws an Error with the response text when the upload fails', async () => {
+  it('returns a friendly error message for 422 Unprocessable Entity', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
+      status: 422,
       statusText: 'Unprocessable Entity',
-      text: () => Promise.resolve('Formato no válido'),
+      text: () => Promise.resolve('Unprocessable entity: could not parse PDF'),
     }));
 
     const file = new File(['bad'], 'ticket.pdf', { type: 'application/pdf' });
-    await expect(uploadTicket(file)).rejects.toThrow('Formato no válido');
+    await expect(uploadTicket(file)).rejects.toThrow('El PDF no es un ticket de Mercadona válido');
   });
 
-  it('throws an Error when the server returns 409 Conflict (duplicate file)', async () => {
+  it('returns a friendly error message for 409 Conflict (duplicate file)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 409,
@@ -175,7 +204,31 @@ describe('uploadTicket', () => {
     }));
 
     const file = new File(['%PDF'], 'ticket.pdf', { type: 'application/pdf' });
-    await expect(uploadTicket(file)).rejects.toThrow('Conflict: file already imported');
+    await expect(uploadTicket(file)).rejects.toThrow('Este ticket ya fue importado anteriormente');
+  });
+
+  it('returns a friendly error message for 429 Too Many Requests', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      statusText: 'Too Many Requests',
+      text: () => Promise.resolve('Too many requests'),
+    }));
+
+    const file = new File(['%PDF'], 'ticket.pdf', { type: 'application/pdf' });
+    await expect(uploadTicket(file)).rejects.toThrow('Demasiadas solicitudes');
+  });
+
+  it('returns a friendly error message for 500 server errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Server Error',
+      text: () => Promise.resolve('internal Go error details'),
+    }));
+
+    const file = new File(['%PDF'], 'ticket.pdf', { type: 'application/pdf' });
+    await expect(uploadTicket(file)).rejects.toThrow('Error del servidor. Inténtalo de nuevo más tarde');
   });
 });
 
@@ -209,8 +262,9 @@ describe('uploadTickets', () => {
       }
       return Promise.resolve({
         ok: false,
-        statusText: 'Error',
-        text: () => Promise.resolve('Fallo al procesar'),
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        text: () => Promise.resolve('Unprocessable entity: could not parse'),
       });
     }));
 
@@ -228,7 +282,8 @@ describe('uploadTickets', () => {
     expect(okItem?.ok).toBe(true);
     expect(failItem?.ok).toBe(false);
     if (failItem && !failItem.ok) {
-      expect(failItem.error).toBe('Fallo al procesar');
+      // El mensaje debe ser el amigable, no el raw del servidor
+      expect(failItem.error).toBe('El PDF no es un ticket de Mercadona válido');
     }
   });
 
@@ -268,7 +323,8 @@ describe('uploadTickets', () => {
   it('calls onProgress even when a file fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
-      statusText: 'Error',
+      status: 422,
+      statusText: 'Unprocessable Entity',
       text: () => Promise.resolve('error'),
     }));
 
@@ -301,7 +357,7 @@ describe('getAnalytics', () => {
     expect(result).toEqual(mockAnalytics);
   });
 
-  it('calls GET /api/analytics', async () => {
+  it('calls GET /api/analytics with a signal', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve(mockAnalytics),
@@ -309,7 +365,10 @@ describe('getAnalytics', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await getAnalytics();
-    expect(fetchMock).toHaveBeenCalledWith('/api/analytics');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/analytics',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('throws an Error when the response is not OK', async () => {

@@ -2,8 +2,6 @@ import { useRef, useState } from 'react';
 import { uploadTickets } from '../api/products';
 import type { TicketUploadSummary } from '../types';
 
-// ── Icons ──────────────────────────────────────────────────────────────────────
-
 function UploadIcon() {
   return (
     <svg
@@ -90,13 +88,19 @@ function CloseIcon() {
   );
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-
 type UploadState = 'idle' | 'uploading' | 'done';
 
 interface UploadProgress {
   done: number;
   total: number;
+}
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+function clientErrorMessage(name: string): string {
+  return name.includes('(no es un PDF)')
+    ? 'El archivo no es un PDF válido'
+    : 'El archivo supera el tamaño máximo permitido (10 MB)';
 }
 
 export default function TicketUploader() {
@@ -110,11 +114,35 @@ export default function TicketUploader() {
   }
 
   async function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
+    const rawFiles = Array.from(e.target.files ?? []);
+    if (rawFiles.length === 0) return;
 
-    // Reset the input so the same files can be re-selected if needed
+    // Reset so the same file can be re-selected after dismissal.
     e.target.value = '';
+
+    const invalidFiles: string[] = [];
+    const files = rawFiles.filter((f) => {
+      if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) {
+        invalidFiles.push(`${f.name} (no es un PDF)`);
+        return false;
+      }
+      if (f.size > MAX_FILE_SIZE) {
+        invalidFiles.push(`${f.name} (supera 10 MB)`);
+        return false;
+      }
+      return true;
+    });
+
+    if (files.length === 0) {
+      const errorItems = invalidFiles.map((name) => ({
+        file: name,
+        ok: false as const,
+        error: clientErrorMessage(name),
+      }));
+      setSummary({ total: errorItems.length, succeeded: 0, failed: errorItems.length, items: errorItems });
+      setUploadState('done');
+      return;
+    }
 
     setUploadState('uploading');
     setSummary(null);
@@ -123,6 +151,17 @@ export default function TicketUploader() {
     const result = await uploadTickets(files, (done, total) => {
       setProgress({ done, total });
     });
+
+    if (invalidFiles.length > 0) {
+      const clientErrors = invalidFiles.map((name) => ({
+        file: name,
+        ok: false as const,
+        error: clientErrorMessage(name),
+      }));
+      result.items.push(...clientErrors);
+      result.total += clientErrors.length;
+      result.failed += clientErrors.length;
+    }
 
     setUploadState('done');
     setSummary(result);
@@ -141,7 +180,6 @@ export default function TicketUploader() {
 
   return (
     <div className="ticket-uploader">
-      {/* Hidden file input — accepts multiple PDF files */}
       <input
         ref={inputRef}
         type="file"
@@ -152,7 +190,6 @@ export default function TicketUploader() {
         onChange={handleFilesSelected}
       />
 
-      {/* Upload button */}
       <button
         type="button"
         className="ticket-uploader__btn"
@@ -167,7 +204,6 @@ export default function TicketUploader() {
         </span>
       </button>
 
-      {/* Progress panel — shown while uploading */}
       {isUploading && progress !== null && (
         <div
           role="status"
@@ -198,7 +234,6 @@ export default function TicketUploader() {
         </div>
       )}
 
-      {/* Result toast */}
       {uploadState === 'done' && summary !== null && (
         <div
           role="status"
@@ -224,7 +259,7 @@ export default function TicketUploader() {
                     <span className="ticket-uploader__toast-filename">{item.file}</span>
                     {item.ok
                       ? ` · ${item.result.linesImported} línea${item.result.linesImported !== 1 ? 's' : ''}`
-                      : ` · ${item.error?.includes('already imported') ? 'Ya importado' : item.error}`}
+                      : ` · ${item.error ?? 'Error al procesar'}`}
                   </li>
                 ))}
               </ul>

@@ -99,7 +99,7 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
       .then((data) => {
         if (!cancelled) setProduct(data);
       })
-      .catch((err) => console.error('Error loading product:', err))
+      .catch((err) => { if (import.meta.env.DEV) console.error('Error loading product:', err); })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });

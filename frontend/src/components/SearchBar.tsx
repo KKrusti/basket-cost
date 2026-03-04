@@ -66,7 +66,7 @@ export default function SearchBar({ onSelectProduct, browserState, onBrowserStat
       setResults(data);
       setSearched(true);
     } catch (err) {
-      console.error('Search error:', err);
+      if (import.meta.env.DEV) console.error('Search error:', err);
       setResults([]);
     } finally {
       setLoading(false);
