@@ -11,6 +11,8 @@ import (
 	"basket-cost/internal/ticket"
 )
 
+const testUserID int64 = 1
+
 // --- Fakes ---
 
 // fakeExtractor implements PDFExtractor and returns a fixed text string.
@@ -40,7 +42,7 @@ type fakeStore struct {
 	err     error
 }
 
-func (f *fakeStore) UpsertPriceRecordBatch(entries []models.PriceRecordEntry) error {
+func (f *fakeStore) UpsertPriceRecordBatch(_ int64, entries []models.PriceRecordEntry) error {
 	if f.err != nil {
 		return f.err
 	}
@@ -75,7 +77,7 @@ func TestImporter_Import_Success(t *testing.T) {
 		store,
 	)
 
-	result, err := imp.Import(bytes.NewReader([]byte{}), 0)
+	result, err := imp.Import(testUserID, bytes.NewReader([]byte{}), 0)
 	if err != nil {
 		t.Fatalf("Import returned unexpected error: %v", err)
 	}
@@ -96,7 +98,7 @@ func TestImporter_Import_ExtractorError(t *testing.T) {
 		&fakeParser{},
 		&fakeStore{},
 	)
-	_, err := imp.Import(bytes.NewReader([]byte{}), 0)
+	_, err := imp.Import(testUserID, bytes.NewReader([]byte{}), 0)
 	if err == nil {
 		t.Error("expected error from extractor, got nil")
 	}
@@ -108,7 +110,7 @@ func TestImporter_Import_ParserError(t *testing.T) {
 		&fakeParser{err: errors.New("unrecognised format")},
 		&fakeStore{},
 	)
-	_, err := imp.Import(bytes.NewReader([]byte{}), 0)
+	_, err := imp.Import(testUserID, bytes.NewReader([]byte{}), 0)
 	if err == nil {
 		t.Error("expected error from parser, got nil")
 	}
@@ -120,7 +122,7 @@ func TestImporter_Import_StoreError_ReturnsError(t *testing.T) {
 		&fakeParser{t: sampleTicket()},
 		&fakeStore{err: errors.New("db locked")},
 	)
-	result, err := imp.Import(bytes.NewReader([]byte{}), 0)
+	result, err := imp.Import(testUserID, bytes.NewReader([]byte{}), 0)
 	// With all-or-nothing semantics the whole import fails.
 	if err == nil {
 		t.Error("expected error from batch store failure, got nil")
@@ -137,7 +139,7 @@ func TestImporter_Import_PriceRecordDate(t *testing.T) {
 		&fakeParser{t: sampleTicket()},
 		store,
 	)
-	_, err := imp.Import(bytes.NewReader([]byte{}), 0)
+	_, err := imp.Import(testUserID, bytes.NewReader([]byte{}), 0)
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}

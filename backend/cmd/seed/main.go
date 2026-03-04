@@ -158,5 +158,6 @@ func importFile(imp *ticket.Importer, path string) (*ticket.ImportResult, error)
 		return nil, fmt.Errorf("stat file: %w", err)
 	}
 
-	return imp.Import(f, info.Size())
+	// Seed uses userID=0 (anonymous/system) since it runs outside a user session.
+	return imp.Import(0, f, info.Size())
 }

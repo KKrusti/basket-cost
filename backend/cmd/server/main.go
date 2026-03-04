@@ -1,6 +1,7 @@
 package main
 
 import (
+	"basket-cost/internal/auth"
 	"basket-cost/internal/database"
 	"basket-cost/internal/enricher"
 	"basket-cost/internal/handlers"
@@ -27,8 +28,8 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 		}
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Requested-With")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Requested-With, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -47,8 +48,25 @@ func securityHeadersMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// optionalAuth extracts a Bearer JWT from Authorization header (if present) and
+// injects the validated user ID into the request context. Requests without a
+// valid token are passed through with userID=0 (anonymous mode).
+func optionalAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		header := r.Header.Get("Authorization")
+		if strings.HasPrefix(header, "Bearer ") {
+			token := strings.TrimPrefix(header, "Bearer ")
+			if userID, err := auth.ValidateToken(token); err == nil && userID > 0 {
+				ctx := context.WithValue(r.Context(), handlers.UserIDContextKey{}, userID)
+				r = r.WithContext(ctx)
+			}
+		}
+		next(w, r)
+	}
+}
+
 func chain(h http.HandlerFunc) http.HandlerFunc {
-	return securityHeadersMiddleware(corsMiddleware(h))
+	return securityHeadersMiddleware(corsMiddleware(optionalAuthMiddleware(h)))
 }
 
 func main() {
@@ -78,6 +96,8 @@ func main() {
 	h := handlers.New(s, imp, enr)
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/api/auth/register", chain(h.RegisterHandler))
+	mux.HandleFunc("/api/auth/login", chain(h.LoginHandler))
 	mux.HandleFunc("/api/products", chain(h.SearchHandler))
 	mux.HandleFunc("/api/products/", chain(h.ProductHandler))
 	mux.HandleFunc("/api/tickets", chain(h.TicketHandler))

@@ -11,9 +11,9 @@ import (
 // Using a narrow interface keeps the ticket package decoupled from the full
 // store package and makes testing easier.
 type TicketStore interface {
-	// UpsertPriceRecordBatch persists all entries inside a single transaction.
-	// Either every entry is committed or none is (all-or-nothing).
-	UpsertPriceRecordBatch(entries []models.PriceRecordEntry) error
+	// UpsertPriceRecordBatch persists all entries scoped to userID inside a
+	// single transaction. Either every entry is committed or none is.
+	UpsertPriceRecordBatch(userID int64, entries []models.PriceRecordEntry) error
 }
 
 // ImportResult summarises the outcome of a single ticket import.
@@ -41,10 +41,10 @@ func NewImporter(extractor PDFExtractor, parser Parser, store TicketStore) *Impo
 }
 
 // Import reads a PDF from r, parses it as a Mercadona receipt, and persists
-// all product lines atomically inside a single transaction.
+// all product lines atomically inside a single transaction scoped to userID.
 // If any line fails to persist the entire ticket is rolled back.
 // r must implement io.ReaderAt; use bytes.NewReader for in-memory data.
-func (imp *Importer) Import(r io.ReaderAt, size int64) (*ImportResult, error) {
+func (imp *Importer) Import(userID int64, r io.ReaderAt, size int64) (*ImportResult, error) {
 	text, err := imp.extractor.Extract(r, size)
 	if err != nil {
 		return nil, fmt.Errorf("extract pdf text: %w", err)
@@ -67,7 +67,7 @@ func (imp *Importer) Import(r io.ReaderAt, size int64) (*ImportResult, error) {
 		}
 	}
 
-	if err := imp.store.UpsertPriceRecordBatch(entries); err != nil {
+	if err := imp.store.UpsertPriceRecordBatch(userID, entries); err != nil {
 		return nil, fmt.Errorf("persist ticket %s: %w", t.InvoiceNumber, err)
 	}
 

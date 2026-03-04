@@ -23,6 +23,17 @@ func newTestStore(t *testing.T) *store.SQLiteStore {
 	return store.New(db)
 }
 
+// createTestUser inserts a user with a deterministic hash and returns its ID.
+// Use this whenever a test needs a valid user_id for FK constraints.
+func createTestUser(t *testing.T, s *store.SQLiteStore) int64 {
+	t.Helper()
+	id, err := s.CreateUser("testuser", "$2a$12$fakehashfortesting000000000000000000000000000000000000")
+	if err != nil {
+		t.Fatalf("createTestUser: %v", err)
+	}
+	return id
+}
+
 func date(year, month, day int) time.Time {
 	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
 }
@@ -38,6 +49,19 @@ func sampleProduct(id string) models.Product {
 			{Date: date(2025, 6, 15), Price: 0.85, Store: "Mercadona"},
 			{Date: date(2026, 1, 20), Price: 0.89, Store: "Mercadona"},
 		},
+	}
+}
+
+// insertProductForUser inserts a product and its price records scoped to userID,
+// using UpsertPriceRecordBatch so the user_id FK is set correctly.
+func insertProductForUser(t *testing.T, s *store.SQLiteStore, userID int64, p models.Product) {
+	t.Helper()
+	entries := make([]models.PriceRecordEntry, len(p.PriceHistory))
+	for i, r := range p.PriceHistory {
+		entries[i] = models.PriceRecordEntry{Name: p.Name, Record: r}
+	}
+	if err := s.UpsertPriceRecordBatch(userID, entries); err != nil {
+		t.Fatalf("insertProductForUser %q: %v", p.Name, err)
 	}
 }
 
@@ -180,6 +204,7 @@ func TestGetProductByID_PriceHistoryOrderedByDate(t *testing.T) {
 
 func TestSearchProducts_EmptyQuery_ReturnsAll(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	products := []models.Product{
 		{ID: "a", Name: "LECHE ENTERA", Category: "Lácteos", PriceHistory: []models.PriceRecord{
@@ -190,12 +215,10 @@ func TestSearchProducts_EmptyQuery_ReturnsAll(t *testing.T) {
 		}},
 	}
 	for _, p := range products {
-		if err := s.InsertProduct(p); err != nil {
-			t.Fatalf("insert %s: %v", p.ID, err)
-		}
+		insertProductForUser(t, s, uid, p)
 	}
 
-	results, err := s.SearchProducts("")
+	results, err := s.SearchProducts(uid, "")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
@@ -206,7 +229,10 @@ func TestSearchProducts_EmptyQuery_ReturnsAll(t *testing.T) {
 
 func TestSearchProducts_WithQuery_ReturnsMatches(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
+	// insertProductForUser uses UpsertPriceRecordBatch which derives the ID via
+	// slugify(name), so the stored ID is the slug rather than the struct's ID field.
 	products := []models.Product{
 		{ID: "a", Name: "LECHE ENTERA HACENDADO", Category: "Lácteos", PriceHistory: []models.PriceRecord{
 			{Date: date(2025, 1, 1), Price: 0.89, Store: "Mercadona"},
@@ -216,30 +242,27 @@ func TestSearchProducts_WithQuery_ReturnsMatches(t *testing.T) {
 		}},
 	}
 	for _, p := range products {
-		if err := s.InsertProduct(p); err != nil {
-			t.Fatalf("insert %s: %v", p.ID, err)
-		}
+		insertProductForUser(t, s, uid, p)
 	}
 
-	results, err := s.SearchProducts("leche")
+	results, err := s.SearchProducts(uid, "leche")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
 	if len(results) != 1 {
 		t.Errorf("want 1 result, got %d", len(results))
 	}
-	if len(results) > 0 && results[0].ID != "a" {
-		t.Errorf("want product 'a', got %q", results[0].ID)
+	if len(results) > 0 && results[0].ID != "leche-entera-hacendado" {
+		t.Errorf("want product 'leche-entera-hacendado', got %q", results[0].ID)
 	}
 }
 
 func TestSearchProducts_NoMatch_ReturnsEmptySlice(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.InsertProduct(sampleProduct("1")); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	uid := createTestUser(t, s)
+	insertProductForUser(t, s, uid, sampleProduct("1"))
 
-	results, err := s.SearchProducts("xyznonexistent")
+	results, err := s.SearchProducts(uid, "xyznonexistent")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
@@ -253,6 +276,7 @@ func TestSearchProducts_NoMatch_ReturnsEmptySlice(t *testing.T) {
 
 func TestSearchProducts_CaseInsensitive(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 	p := models.Product{
 		ID:       "ci",
 		Name:     "LECHE ENTERA",
@@ -261,13 +285,11 @@ func TestSearchProducts_CaseInsensitive(t *testing.T) {
 			{Date: date(2025, 1, 1), Price: 0.89, Store: "Mercadona"},
 		},
 	}
-	if err := s.InsertProduct(p); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	insertProductForUser(t, s, uid, p)
 
 	for _, q := range []string{"leche", "LECHE", "Leche", "lEcHe"} {
 		t.Run(q, func(t *testing.T) {
-			results, err := s.SearchProducts(q)
+			results, err := s.SearchProducts(uid, q)
 			if err != nil {
 				t.Fatalf("SearchProducts(%q): %v", q, err)
 			}
@@ -280,6 +302,7 @@ func TestSearchProducts_CaseInsensitive(t *testing.T) {
 
 func TestSearchProducts_MinMaxPrice(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 	p := models.Product{
 		ID:       "mm",
 		Name:     "ACEITE OLIVA",
@@ -290,11 +313,9 @@ func TestSearchProducts_MinMaxPrice(t *testing.T) {
 			{Date: date(2025, 12, 1), Price: 6.50, Store: "A"},
 		},
 	}
-	if err := s.InsertProduct(p); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	insertProductForUser(t, s, uid, p)
 
-	results, err := s.SearchProducts("")
+	results, err := s.SearchProducts(uid, "")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
@@ -313,6 +334,7 @@ func TestSearchProducts_MinMaxPrice(t *testing.T) {
 
 func TestSearchProducts_LastPurchaseDatePopulated(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 	p := models.Product{
 		ID:       "lpd",
 		Name:     "YOGUR NATURAL",
@@ -322,11 +344,9 @@ func TestSearchProducts_LastPurchaseDatePopulated(t *testing.T) {
 			{Date: date(2025, 9, 15), Price: 0.35, Store: "Mercadona"},
 		},
 	}
-	if err := s.InsertProduct(p); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	insertProductForUser(t, s, uid, p)
 
-	results, err := s.SearchProducts("")
+	results, err := s.SearchProducts(uid, "")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
@@ -340,8 +360,9 @@ func TestSearchProducts_LastPurchaseDatePopulated(t *testing.T) {
 
 func TestSearchProducts_OrderedByLastPurchaseDateDesc(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
-	// Insert two products with different last purchase dates.
+	// insertProductForUser derives IDs via slugify(name), so IDs are slugs.
 	older := models.Product{
 		ID:   "old",
 		Name: "PAN INTEGRAL",
@@ -356,32 +377,29 @@ func TestSearchProducts_OrderedByLastPurchaseDateDesc(t *testing.T) {
 			{Date: date(2026, 2, 1), Price: 0.89, Store: "A"},
 		},
 	}
-	if err := s.InsertProduct(older); err != nil {
-		t.Fatalf("insert older: %v", err)
-	}
-	if err := s.InsertProduct(newer); err != nil {
-		t.Fatalf("insert newer: %v", err)
-	}
+	insertProductForUser(t, s, uid, older)
+	insertProductForUser(t, s, uid, newer)
 
-	results, err := s.SearchProducts("")
+	results, err := s.SearchProducts(uid, "")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
 	if len(results) != 2 {
 		t.Fatalf("want 2 results, got %d", len(results))
 	}
-	// Most recently purchased product should be first.
-	if results[0].ID != "new" {
-		t.Errorf("first result: want %q (newest), got %q", "new", results[0].ID)
+	// Most recently purchased product (leche-entera, 2026-02-01) should be first.
+	if results[0].ID != "leche-entera" {
+		t.Errorf("first result: want %q (newest), got %q", "leche-entera", results[0].ID)
 	}
-	if results[1].ID != "old" {
-		t.Errorf("second result: want %q (oldest), got %q", "old", results[1].ID)
+	if results[1].ID != "pan-integral" {
+		t.Errorf("second result: want %q (oldest), got %q", "pan-integral", results[1].ID)
 	}
 }
 
 func TestSearchProducts_EmptyDB_ReturnsEmptySlice(t *testing.T) {
 	s := newTestStore(t)
-	results, err := s.SearchProducts("")
+	uid := createTestUser(t, s)
+	results, err := s.SearchProducts(uid, "")
 	if err != nil {
 		t.Fatalf("SearchProducts on empty DB: %v", err)
 	}
@@ -418,17 +436,17 @@ func TestUpdateProductImageURL_SetsURL(t *testing.T) {
 
 func TestUpdateProductImageURL_SearchResultIncludesURL(t *testing.T) {
 	s := newTestStore(t)
-	p := sampleProduct("img-search")
-	if err := s.InsertProduct(p); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	uid := createTestUser(t, s)
+	// insertProductForUser uses UpsertPriceRecordBatch which generates the ID via
+	// slugify("LECHE ENTERA HACENDADO 1L") = "leche-entera-hacendado-1l".
+	insertProductForUser(t, s, uid, sampleProduct("img-search"))
 
 	const url = "https://prod-mercadona.imgix.net/images/xyz.jpg?fit=crop&h=300&w=300"
-	if err := s.UpdateProductImageURL("img-search", url); err != nil {
+	if err := s.UpdateProductImageURL("leche-entera-hacendado-1l", url); err != nil {
 		t.Fatalf("UpdateProductImageURL: %v", err)
 	}
 
-	results, err := s.SearchProducts("")
+	results, err := s.SearchProducts(uid, "")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
@@ -452,7 +470,8 @@ func TestUpdateProductImageURL_NoOpOnMissingProduct(t *testing.T) {
 
 func TestIsFileProcessed_UnknownFile_ReturnsFalse(t *testing.T) {
 	s := newTestStore(t)
-	got, err := s.IsFileProcessed("ticket-2026-01.pdf")
+	uid := createTestUser(t, s)
+	got, err := s.IsFileProcessed(uid, "ticket-2026-01.pdf")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -463,13 +482,14 @@ func TestIsFileProcessed_UnknownFile_ReturnsFalse(t *testing.T) {
 
 func TestMarkFileProcessed_ThenIsFileProcessed_ReturnsTrue(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 	filename := "ticket-2026-02.pdf"
 
-	if err := s.MarkFileProcessed(filename, date(2026, 2, 1)); err != nil {
+	if err := s.MarkFileProcessed(uid, filename, date(2026, 2, 1)); err != nil {
 		t.Fatalf("MarkFileProcessed: %v", err)
 	}
 
-	got, err := s.IsFileProcessed(filename)
+	got, err := s.IsFileProcessed(uid, filename)
 	if err != nil {
 		t.Fatalf("IsFileProcessed: %v", err)
 	}
@@ -480,29 +500,31 @@ func TestMarkFileProcessed_ThenIsFileProcessed_ReturnsTrue(t *testing.T) {
 
 func TestMarkFileProcessed_Idempotent(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 	filename := "ticket-2026-03.pdf"
 
-	if err := s.MarkFileProcessed(filename, date(2026, 3, 1)); err != nil {
+	if err := s.MarkFileProcessed(uid, filename, date(2026, 3, 1)); err != nil {
 		t.Fatalf("first MarkFileProcessed: %v", err)
 	}
 	// Second call with same filename must not return an error (INSERT OR IGNORE).
-	if err := s.MarkFileProcessed(filename, date(2026, 3, 2)); err != nil {
+	if err := s.MarkFileProcessed(uid, filename, date(2026, 3, 2)); err != nil {
 		t.Fatalf("second MarkFileProcessed (idempotent): %v", err)
 	}
 }
 
 func TestIsFileProcessed_DifferentFilenames_IndependentTracking(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
-	if err := s.MarkFileProcessed("a.pdf", date(2026, 1, 1)); err != nil {
+	if err := s.MarkFileProcessed(uid, "a.pdf", date(2026, 1, 1)); err != nil {
 		t.Fatalf("MarkFileProcessed a.pdf: %v", err)
 	}
 
-	gotA, err := s.IsFileProcessed("a.pdf")
+	gotA, err := s.IsFileProcessed(uid, "a.pdf")
 	if err != nil {
 		t.Fatalf("IsFileProcessed a.pdf: %v", err)
 	}
-	gotB, err := s.IsFileProcessed("b.pdf")
+	gotB, err := s.IsFileProcessed(uid, "b.pdf")
 	if err != nil {
 		t.Fatalf("IsFileProcessed b.pdf: %v", err)
 	}
@@ -519,17 +541,18 @@ func TestIsFileProcessed_DifferentFilenames_IndependentTracking(t *testing.T) {
 
 func TestUpsertPriceRecordBatch_AllEntriesCommitted(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	entries := []models.PriceRecordEntry{
 		{Name: "LECHE ENTERA", Record: models.PriceRecord{Date: date(2026, 1, 1), Price: 0.89, Store: "Mercadona"}},
 		{Name: "PAN INTEGRAL", Record: models.PriceRecord{Date: date(2026, 1, 1), Price: 1.25, Store: "Mercadona"}},
 		{Name: "YOGUR NATURAL", Record: models.PriceRecord{Date: date(2026, 1, 1), Price: 0.35, Store: "Mercadona"}},
 	}
-	if err := s.UpsertPriceRecordBatch(entries); err != nil {
+	if err := s.UpsertPriceRecordBatch(uid, entries); err != nil {
 		t.Fatalf("UpsertPriceRecordBatch: %v", err)
 	}
 
-	results, err := s.SearchProducts("")
+	results, err := s.SearchProducts(uid, "")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
@@ -540,10 +563,11 @@ func TestUpsertPriceRecordBatch_AllEntriesCommitted(t *testing.T) {
 
 func TestUpsertPriceRecordBatch_EmptySlice_NoOp(t *testing.T) {
 	s := newTestStore(t)
-	if err := s.UpsertPriceRecordBatch([]models.PriceRecordEntry{}); err != nil {
+	uid := createTestUser(t, s)
+	if err := s.UpsertPriceRecordBatch(uid, []models.PriceRecordEntry{}); err != nil {
 		t.Fatalf("UpsertPriceRecordBatch with empty slice: %v", err)
 	}
-	results, err := s.SearchProducts("")
+	results, err := s.SearchProducts(uid, "")
 	if err != nil {
 		t.Fatalf("SearchProducts: %v", err)
 	}
@@ -554,20 +578,21 @@ func TestUpsertPriceRecordBatch_EmptySlice_NoOp(t *testing.T) {
 
 func TestUpsertPriceRecordBatch_IdempotentProduct(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	entry := models.PriceRecordEntry{
 		Name:   "LECHE ENTERA",
 		Record: models.PriceRecord{Date: date(2026, 1, 1), Price: 0.89, Store: "Mercadona"},
 	}
 	// Insert twice: the product row should appear only once, but two price records.
-	if err := s.UpsertPriceRecordBatch([]models.PriceRecordEntry{entry}); err != nil {
+	if err := s.UpsertPriceRecordBatch(uid, []models.PriceRecordEntry{entry}); err != nil {
 		t.Fatalf("first batch: %v", err)
 	}
 	entry2 := models.PriceRecordEntry{
 		Name:   "LECHE ENTERA",
 		Record: models.PriceRecord{Date: date(2026, 2, 1), Price: 0.92, Store: "Mercadona"},
 	}
-	if err := s.UpsertPriceRecordBatch([]models.PriceRecordEntry{entry2}); err != nil {
+	if err := s.UpsertPriceRecordBatch(uid, []models.PriceRecordEntry{entry2}); err != nil {
 		t.Fatalf("second batch: %v", err)
 	}
 
@@ -585,12 +610,13 @@ func TestUpsertPriceRecordBatch_IdempotentProduct(t *testing.T) {
 
 func TestUpsertPriceRecordBatch_PriceAndDatePreserved(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	want := models.PriceRecord{Date: date(2026, 3, 15), Price: 2.49, Store: "Mercadona"}
 	entries := []models.PriceRecordEntry{
 		{Name: "ACEITE GIRASOL", Record: want},
 	}
-	if err := s.UpsertPriceRecordBatch(entries); err != nil {
+	if err := s.UpsertPriceRecordBatch(uid, entries); err != nil {
 		t.Fatalf("UpsertPriceRecordBatch: %v", err)
 	}
 
@@ -617,13 +643,14 @@ func TestUpsertPriceRecordBatch_PriceAndDatePreserved(t *testing.T) {
 
 func TestGetProductsWithoutImage_ReturnsOnlyUnimaged(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	// Insert two products via UpsertPriceRecord; neither has an image yet.
 	rec := models.PriceRecord{Date: date(2025, 1, 1), Price: 1.00, Store: "Mercadona"}
-	if err := s.UpsertPriceRecord("LECHE ENTERA", rec); err != nil {
+	if err := s.UpsertPriceRecord(uid, "LECHE ENTERA", rec); err != nil {
 		t.Fatalf("upsert leche: %v", err)
 	}
-	if err := s.UpsertPriceRecord("PAN MOLDE", rec); err != nil {
+	if err := s.UpsertPriceRecord(uid, "PAN MOLDE", rec); err != nil {
 		t.Fatalf("upsert pan: %v", err)
 	}
 
@@ -650,9 +677,10 @@ func TestGetProductsWithoutImage_ReturnsOnlyUnimaged(t *testing.T) {
 
 func TestGetProductsWithoutImage_EmptyWhenAllHaveImage(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	rec := models.PriceRecord{Date: date(2025, 1, 1), Price: 1.00, Store: "Mercadona"}
-	if err := s.UpsertPriceRecord("LECHE ENTERA", rec); err != nil {
+	if err := s.UpsertPriceRecord(uid, "LECHE ENTERA", rec); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
 	if err := s.UpdateProductImageURL("leche-entera", "https://img/leche.jpg"); err != nil {
@@ -683,6 +711,7 @@ func TestGetProductsWithoutImage_EmptyStore(t *testing.T) {
 
 func TestGetMostPurchased_RankedByPurchaseCount(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	// leche: 3 records, pan: 1 record.
 	leche := models.Product{
@@ -701,33 +730,31 @@ func TestGetMostPurchased_RankedByPurchaseCount(t *testing.T) {
 			{Date: date(2025, 1, 1), Price: 1.25, Store: "Mercadona"},
 		},
 	}
-	if err := s.InsertProduct(leche); err != nil {
-		t.Fatalf("insert leche: %v", err)
-	}
-	if err := s.InsertProduct(pan); err != nil {
-		t.Fatalf("insert pan: %v", err)
-	}
+	insertProductForUser(t, s, uid, leche)
+	insertProductForUser(t, s, uid, pan)
 
-	got, err := s.GetMostPurchased(10)
+	got, err := s.GetMostPurchased(uid, 10)
 	if err != nil {
 		t.Fatalf("GetMostPurchased: %v", err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("want 2 results, got %d", len(got))
 	}
-	if got[0].ID != "leche" {
-		t.Errorf("first: want %q (3 purchases), got %q", "leche", got[0].ID)
+	// insertProductForUser derives IDs via slugify(name).
+	if got[0].ID != "leche-entera" {
+		t.Errorf("first: want %q (3 purchases), got %q", "leche-entera", got[0].ID)
 	}
 	if got[0].PurchaseCount != 3 {
 		t.Errorf("leche PurchaseCount: want 3, got %d", got[0].PurchaseCount)
 	}
-	if got[1].ID != "pan" {
-		t.Errorf("second: want %q (1 purchase), got %q", "pan", got[1].ID)
+	if got[1].ID != "pan-integral" {
+		t.Errorf("second: want %q (1 purchase), got %q", "pan-integral", got[1].ID)
 	}
 }
 
 func TestGetMostPurchased_RespectsLimit(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	for i, name := range []string{"LECHE ENTERA", "PAN INTEGRAL", "YOGUR NATURAL"} {
 		p := models.Product{
@@ -737,12 +764,10 @@ func TestGetMostPurchased_RespectsLimit(t *testing.T) {
 				{Date: date(2025, 1, i+1), Price: 1.00, Store: "Mercadona"},
 			},
 		}
-		if err := s.InsertProduct(p); err != nil {
-			t.Fatalf("insert %s: %v", name, err)
-		}
+		insertProductForUser(t, s, uid, p)
 	}
 
-	got, err := s.GetMostPurchased(2)
+	got, err := s.GetMostPurchased(uid, 2)
 	if err != nil {
 		t.Fatalf("GetMostPurchased: %v", err)
 	}
@@ -753,7 +778,8 @@ func TestGetMostPurchased_RespectsLimit(t *testing.T) {
 
 func TestGetMostPurchased_EmptyDB_ReturnsEmptySlice(t *testing.T) {
 	s := newTestStore(t)
-	got, err := s.GetMostPurchased(10)
+	uid := createTestUser(t, s)
+	got, err := s.GetMostPurchased(uid, 10)
 	if err != nil {
 		t.Fatalf("GetMostPurchased: %v", err)
 	}
@@ -767,6 +793,7 @@ func TestGetMostPurchased_EmptyDB_ReturnsEmptySlice(t *testing.T) {
 
 func TestGetMostPurchased_CurrentPriceIsLatest(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 	p := models.Product{
 		ID:   "precio",
 		Name: "ACEITE OLIVA",
@@ -775,11 +802,9 @@ func TestGetMostPurchased_CurrentPriceIsLatest(t *testing.T) {
 			{Date: date(2026, 1, 1), Price: 5.50, Store: "Mercadona"},
 		},
 	}
-	if err := s.InsertProduct(p); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	insertProductForUser(t, s, uid, p)
 
-	got, err := s.GetMostPurchased(10)
+	got, err := s.GetMostPurchased(uid, 10)
 	if err != nil {
 		t.Fatalf("GetMostPurchased: %v", err)
 	}
@@ -795,6 +820,7 @@ func TestGetMostPurchased_CurrentPriceIsLatest(t *testing.T) {
 
 func TestGetBiggestPriceIncreases_RankedByPercent(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	// aceite: +100% (2 → 4), leche: +12.5% (0.80 → 0.90)
 	aceite := models.Product{
@@ -813,30 +839,28 @@ func TestGetBiggestPriceIncreases_RankedByPercent(t *testing.T) {
 			{Date: date(2026, 1, 1), Price: 0.90, Store: "Mercadona"},
 		},
 	}
-	if err := s.InsertProduct(aceite); err != nil {
-		t.Fatalf("insert aceite: %v", err)
-	}
-	if err := s.InsertProduct(leche); err != nil {
-		t.Fatalf("insert leche: %v", err)
-	}
+	insertProductForUser(t, s, uid, aceite)
+	insertProductForUser(t, s, uid, leche)
 
-	got, err := s.GetBiggestPriceIncreases(10)
+	got, err := s.GetBiggestPriceIncreases(uid, 10)
 	if err != nil {
 		t.Fatalf("GetBiggestPriceIncreases: %v", err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("want 2, got %d", len(got))
 	}
-	if got[0].ID != "aceite" {
-		t.Errorf("first: want %q (+100%%), got %q", "aceite", got[0].ID)
+	// insertProductForUser derives IDs via slugify(name).
+	if got[0].ID != "aceite-oliva" {
+		t.Errorf("first: want %q (+100%%), got %q", "aceite-oliva", got[0].ID)
 	}
 	if got[0].IncreasePercent != 100.0 {
-		t.Errorf("aceite IncreasePercent: want 100, got %f", got[0].IncreasePercent)
+		t.Errorf("aceite-oliva IncreasePercent: want 100, got %f", got[0].IncreasePercent)
 	}
 }
 
 func TestGetBiggestPriceIncreases_ExcludesDecreases(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	// precio bajó
 	p := models.Product{
@@ -847,11 +871,9 @@ func TestGetBiggestPriceIncreases_ExcludesDecreases(t *testing.T) {
 			{Date: date(2026, 1, 1), Price: 1.50, Store: "Mercadona"},
 		},
 	}
-	if err := s.InsertProduct(p); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	insertProductForUser(t, s, uid, p)
 
-	got, err := s.GetBiggestPriceIncreases(10)
+	got, err := s.GetBiggestPriceIncreases(uid, 10)
 	if err != nil {
 		t.Fatalf("GetBiggestPriceIncreases: %v", err)
 	}
@@ -862,6 +884,7 @@ func TestGetBiggestPriceIncreases_ExcludesDecreases(t *testing.T) {
 
 func TestGetBiggestPriceIncreases_ExcludesSingleRecord(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	p := models.Product{
 		ID:   "one",
@@ -870,11 +893,9 @@ func TestGetBiggestPriceIncreases_ExcludesSingleRecord(t *testing.T) {
 			{Date: date(2025, 1, 1), Price: 1.00, Store: "Mercadona"},
 		},
 	}
-	if err := s.InsertProduct(p); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	insertProductForUser(t, s, uid, p)
 
-	got, err := s.GetBiggestPriceIncreases(10)
+	got, err := s.GetBiggestPriceIncreases(uid, 10)
 	if err != nil {
 		t.Fatalf("GetBiggestPriceIncreases: %v", err)
 	}
@@ -885,6 +906,7 @@ func TestGetBiggestPriceIncreases_ExcludesSingleRecord(t *testing.T) {
 
 func TestGetBiggestPriceIncreases_FieldsPopulated(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	p := models.Product{
 		ID:   "yogur",
@@ -894,11 +916,9 @@ func TestGetBiggestPriceIncreases_FieldsPopulated(t *testing.T) {
 			{Date: date(2026, 1, 1), Price: 0.60, Store: "Mercadona"},
 		},
 	}
-	if err := s.InsertProduct(p); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
+	insertProductForUser(t, s, uid, p)
 
-	got, err := s.GetBiggestPriceIncreases(10)
+	got, err := s.GetBiggestPriceIncreases(uid, 10)
 	if err != nil {
 		t.Fatalf("GetBiggestPriceIncreases: %v", err)
 	}
@@ -919,6 +939,7 @@ func TestGetBiggestPriceIncreases_FieldsPopulated(t *testing.T) {
 
 func TestGetBiggestPriceIncreases_RespectsLimit(t *testing.T) {
 	s := newTestStore(t)
+	uid := createTestUser(t, s)
 
 	for i, name := range []string{"PROD A", "PROD B", "PROD C"} {
 		price := float64(i+1) * 1.0
@@ -930,12 +951,10 @@ func TestGetBiggestPriceIncreases_RespectsLimit(t *testing.T) {
 				{Date: date(2026, 1, 1), Price: price * 2, Store: "Mercadona"},
 			},
 		}
-		if err := s.InsertProduct(p); err != nil {
-			t.Fatalf("insert %s: %v", name, err)
-		}
+		insertProductForUser(t, s, uid, p)
 	}
 
-	got, err := s.GetBiggestPriceIncreases(2)
+	got, err := s.GetBiggestPriceIncreases(uid, 2)
 	if err != nil {
 		t.Fatalf("GetBiggestPriceIncreases: %v", err)
 	}
