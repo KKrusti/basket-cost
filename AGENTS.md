@@ -363,9 +363,6 @@ Inline arrow functions within components are acceptable for simple formatters (`
 
 ---
 
-## WSL / Windows Note
-
-`node_modules` is installed in a Linux-native path (`/home/carlos/.npm-workspaces/basket-cost/node_modules`) and symlinked into `frontend/node_modules` to avoid NTFS `chmod` errors. This is handled automatically by `task dev:deps`. Do not delete or recreate `frontend/node_modules` as a real directory — keep it as a symlink.
 
 Use 'bd' for task tracking
 
