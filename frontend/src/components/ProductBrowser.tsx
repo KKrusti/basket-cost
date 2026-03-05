@@ -143,7 +143,7 @@ export default function ProductBrowser({
           data-testid="browser-skeleton"
         >
           {Array.from({ length: columns * 2 }).map((_, n) => (
-            <div key={n} className="skeleton" style={{ height: '96px' }} />
+            <div key={n} className="skeleton browser-skeleton-item" />
           ))}
         </div>
       </div>

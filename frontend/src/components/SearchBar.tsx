@@ -91,7 +91,7 @@ export default function SearchBar({ onSelectProduct, browserState, onBrowserStat
           <input
             type="text"
             className="search-input"
-            placeholder="Search product... (e.g. leche, aceite, pan)"
+            placeholder="Buscar producto... (leche, aceite, pan)"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus

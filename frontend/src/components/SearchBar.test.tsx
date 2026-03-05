@@ -26,7 +26,7 @@ beforeEach(() => {
 describe('SearchBar', () => {
   it('renders the search input', () => {
     render(<SearchBar onSelectProduct={vi.fn()} />);
-    expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/buscar producto/i)).toBeInTheDocument();
   });
 
   it('shows the product browser when nothing has been searched', () => {

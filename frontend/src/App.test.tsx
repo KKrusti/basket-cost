@@ -46,7 +46,7 @@ describe('App', () => {
 
   it('shows SearchBar by default', () => {
     render(<App />);
-    expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/buscar producto/i)).toBeInTheDocument();
   });
 
   it('navigates to ProductDetail when a product is selected', async () => {
@@ -68,9 +68,9 @@ describe('App', () => {
     await userEvent.type(screen.getByRole('textbox'), 'leche');
     await waitFor(() => screen.getByText('LECHE ENTERA HACENDADO 1L'));
     await userEvent.click(screen.getByText('LECHE ENTERA HACENDADO 1L'));
-    await waitFor(() => screen.getByRole('button', { name: /back to search/i }));
-    await userEvent.click(screen.getByRole('button', { name: /back to search/i }));
-    expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
+    await waitFor(() => screen.getByRole('button', { name: /volver/i }));
+    await userEvent.click(screen.getByRole('button', { name: /volver/i }));
+    expect(screen.getByPlaceholderText(/buscar producto/i)).toBeInTheDocument();
   });
 
   it('clicking the logo navigates to the home with productos tab and resets to page 1', async () => {
@@ -87,7 +87,7 @@ describe('App', () => {
 
     // Debe volver a la pestaña productos
     expect(screen.getByRole('tab', { name: /productos/i })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/buscar producto/i)).toBeInTheDocument();
   });
 
   it('clicking the logo from ProductDetail returns to home', async () => {
@@ -99,12 +99,12 @@ describe('App', () => {
     await userEvent.type(screen.getByRole('textbox'), 'leche');
     await waitFor(() => screen.getByText('LECHE ENTERA HACENDADO 1L'));
     await userEvent.click(screen.getByText('LECHE ENTERA HACENDADO 1L'));
-    await waitFor(() => screen.getByRole('button', { name: /back to search/i }));
+    await waitFor(() => screen.getByRole('button', { name: /volver/i }));
 
     // Clickar en el logo
     await userEvent.click(screen.getByRole('button', { name: /ir a la página principal/i }));
 
     // Debe volver al buscador
-    expect(screen.getByPlaceholderText(/search product/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/buscar producto/i)).toBeInTheDocument();
   });
 });

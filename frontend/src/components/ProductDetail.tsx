@@ -220,16 +220,16 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
   }, [productId]);
 
   if (loading) {
-    return <div className="loading">Loading product...</div>;
+    return <div className="loading">Cargando producto...</div>;
   }
 
   if (!product) {
     return (
       <div className="empty-state">
-        <p>Product not found</p>
+        <p>Producto no encontrado</p>
         <button className="back-btn" onClick={onBack}>
           <BackArrowIcon />
-          Back to search
+          Volver a la búsqueda
         </button>
       </div>
     );
@@ -266,9 +266,9 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
 
   return (
     <div className="product-detail">
-      <button className="back-btn" onClick={onBack} aria-label="Back to search">
+      <button className="back-btn" onClick={onBack} aria-label="Volver a la búsqueda">
         <BackArrowIcon />
-        Back to search
+        Volver
       </button>
 
       <div className="detail-header">
@@ -305,7 +305,7 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
       <hr className="detail-divider" />
 
       <div className="chart-container">
-        <h3 className="chart-container__title">Price history</h3>
+        <h3 className="chart-container__title">Evolución del precio</h3>
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -320,12 +320,12 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
               domain={[yMin, yMax]}
               tickFormatter={(v: number) => formatPrice(v)}
               tick={{ fontSize: 12, fill: 'var(--color-text-muted)' }}
-              width={72}
+              width={56}
               axisLine={false}
               tickLine={false}
             />
             <Tooltip
-              formatter={(value: number) => [formatPrice(value), 'Price']}
+              formatter={(value: number) => [formatPrice(value), 'Precio']}
               labelFormatter={(label: string) => formatDateFull(label)}
               contentStyle={{
                 borderRadius: '10px',
@@ -354,9 +354,9 @@ export default function ProductDetail({ productId, onBack }: ProductDetailProps)
           <table className="price-table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Price</th>
-                <th>Store</th>
+                <th>Fecha</th>
+                <th>Precio</th>
+                <th>Tienda</th>
               </tr>
             </thead>
             <tbody>

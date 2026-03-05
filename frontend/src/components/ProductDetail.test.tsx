@@ -32,10 +32,10 @@ beforeEach(() => {
 });
 
 describe('ProductDetail', () => {
-  it('shows "Loading product..." while loading', () => {
+  it('shows "Cargando producto..." while loading', () => {
     vi.mocked(productsApi.getProduct).mockReturnValue(new Promise(() => {}));
     render(<ProductDetail productId="1" onBack={vi.fn()} />);
-    expect(screen.getByText('Loading product...')).toBeInTheDocument();
+    expect(screen.getByText('Cargando producto...')).toBeInTheDocument();
   });
 
   it('shows the product name after loading', async () => {
@@ -64,16 +64,16 @@ describe('ProductDetail', () => {
   it('shows the price history table', async () => {
     vi.mocked(productsApi.getProduct).mockResolvedValue(mockProduct);
     render(<ProductDetail productId="1" onBack={vi.fn()} />);
-    await waitFor(() => screen.getByText('Price history'));
-    expect(screen.getByText('Date')).toBeInTheDocument();
-    expect(screen.getByText('Price')).toBeInTheDocument();
-    expect(screen.getByText('Store')).toBeInTheDocument();
+    await waitFor(() => screen.getByText('Evolución del precio'));
+    expect(screen.getByText('Fecha')).toBeInTheDocument();
+    expect(screen.getByText('Precio')).toBeInTheDocument();
+    expect(screen.getByText('Tienda')).toBeInTheDocument();
   });
 
   it('shows the stores in the table', async () => {
     vi.mocked(productsApi.getProduct).mockResolvedValue(mockProduct);
     render(<ProductDetail productId="1" onBack={vi.fn()} />);
-    await waitFor(() => screen.getByText('Price history'));
+    await waitFor(() => screen.getByText('Evolución del precio'));
     expect(screen.getAllByText('Mercadona')).toHaveLength(2);
   });
 
@@ -81,7 +81,7 @@ describe('ProductDetail', () => {
     vi.mocked(productsApi.getProduct).mockRejectedValue(new Error('Not found'));
     render(<ProductDetail productId="9999" onBack={vi.fn()} />);
     await waitFor(() =>
-      expect(screen.getByText('Product not found')).toBeInTheDocument()
+      expect(screen.getByText('Producto no encontrado')).toBeInTheDocument()
     );
   });
 
@@ -90,7 +90,7 @@ describe('ProductDetail', () => {
     const onBack = vi.fn();
     render(<ProductDetail productId="1" onBack={onBack} />);
     await waitFor(() => screen.getByText('LECHE ENTERA HACENDADO 1L'));
-    await userEvent.click(screen.getByRole('button', { name: /back to search/i }));
+    await userEvent.click(screen.getByRole('button', { name: /volver/i }));
     expect(onBack).toHaveBeenCalledOnce();
   });
 
