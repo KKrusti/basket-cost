@@ -29,3 +29,7 @@ Thumbs.db
 # Binarios compilados del backend
 /backend/server
 /backend/bin/server
+
+# Playwright
+/frontend/playwright-report/
+/frontend/test-results/
