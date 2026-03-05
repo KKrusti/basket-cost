@@ -3,7 +3,29 @@ import SearchBar from './components/SearchBar';
 import ProductDetail from './components/ProductDetail';
 import TicketUploader from './components/TicketUploader';
 import Analytics from './components/Analytics';
+import LoginModal from './components/LoginModal';
 import type { ProductBrowserState } from './components/ProductBrowser';
+import type { AuthState } from './types';
+
+const AUTH_STORAGE_KEY = 'mercaflacion_auth';
+
+function loadAuth(): AuthState {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as AuthState;
+  } catch {
+    // ignore corrupt storage
+  }
+  return { user: null, token: null };
+}
+
+function saveAuth(auth: AuthState) {
+  if (auth.token) {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+  } else {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  }
+}
 
 type Tab = 'productos' | 'analitica';
 
@@ -22,6 +44,15 @@ function AppLogo() {
   );
 }
 
+function UserIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('productos');
@@ -30,6 +61,8 @@ export default function App() {
     pageSize: 48,
     columns: 3,
   });
+  const [auth, setAuth] = useState<AuthState>(loadAuth);
+  const [showLoginModal, setShowLoginModal] = useState(false);
 
   function handleSelectProduct(id: string) {
     setSelectedProductId(id);
@@ -43,6 +76,18 @@ export default function App() {
     setSelectedProductId(null);
     setActiveTab('productos');
     setBrowserState((prev) => ({ ...prev, page: 0 }));
+  }
+
+  function handleAuth(newAuth: AuthState) {
+    setAuth(newAuth);
+    saveAuth(newAuth);
+    setShowLoginModal(false);
+  }
+
+  function handleLogout() {
+    const cleared: AuthState = { user: null, token: null };
+    setAuth(cleared);
+    saveAuth(cleared);
   }
 
   return (
@@ -59,9 +104,32 @@ export default function App() {
           Consulta y compara el historial de precios de tus productos favoritos
         </p>
         <div className="app-header__actions">
+          {auth.user ? (
+            <button
+              className="auth-btn auth-btn--active"
+              onClick={handleLogout}
+              aria-label={`Cerrar sesión de ${auth.user.username}`}
+            >
+              <UserIcon />
+              {auth.user.username}
+            </button>
+          ) : (
+            <button
+              className="auth-btn"
+              onClick={() => setShowLoginModal(true)}
+              aria-label="Iniciar sesión"
+            >
+              <UserIcon />
+              Entrar
+            </button>
+          )}
           <TicketUploader />
         </div>
       </header>
+
+      {showLoginModal && (
+        <LoginModal onAuth={handleAuth} onClose={() => setShowLoginModal(false)} />
+      )}
 
       {selectedProductId ? (
         <div className="app-content">

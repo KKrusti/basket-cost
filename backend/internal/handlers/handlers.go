@@ -167,6 +167,16 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 // --- Product handlers ---
 
+// ProductRouter dispatches /api/products/{id} and /api/products/{id}/image
+// to the appropriate handler based on the request method and path suffix.
+func (h *Handlers) ProductRouter(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/image") {
+		h.ProductImageHandler(w, r)
+		return
+	}
+	h.ProductHandler(w, r)
+}
+
 func (h *Handlers) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

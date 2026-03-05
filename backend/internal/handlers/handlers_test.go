@@ -773,6 +773,98 @@ func TestLoginHandler_UnknownUser_ReturnsUnauthorized(t *testing.T) {
 	}
 }
 
+// --- ProductRouter ---
+
+func TestProductRouter_DispatchesGetToProductHandler(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/products/1", nil)
+	w := httptest.NewRecorder()
+	h.ProductRouter(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestProductRouter_DispatchesPatchImageToImageHandler(t *testing.T) {
+	h := newHandlers(t)
+	body := jsonBody(t, map[string]string{"imageUrl": "https://prod-mercadona.imgix.net/img.jpg"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	w := httptest.NewRecorder()
+	h.ProductRouter(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProductRouter_WrongMethodForProduct_Returns405(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodDelete, "/api/products/1", nil)
+	w := httptest.NewRecorder()
+	h.ProductRouter(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+// --- ProductImageHandler ---
+
+func TestProductImageHandler_MethodNotAllowed(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/products/1/image", nil)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestProductImageHandler_MissingImageURL_ReturnsBadRequest(t *testing.T) {
+	h := newHandlers(t)
+	body := jsonBody(t, map[string]string{"imageUrl": ""})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestProductImageHandler_ProductNotFound_Returns404(t *testing.T) {
+	h := newHandlers(t)
+	body := jsonBody(t, map[string]string{"imageUrl": "https://prod-mercadona.imgix.net/img.jpg"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/9999/image", body)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestProductImageHandler_ValidRequest_ReturnsOK(t *testing.T) {
+	h := newHandlers(t)
+	imageURL := "https://prod-mercadona.imgix.net/images/img.jpg"
+	body := jsonBody(t, map[string]string{"imageUrl": imageURL})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		ID       string `json:"id"`
+		ImageURL string `json:"imageUrl"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ID != "1" {
+		t.Errorf("expected id '1', got %q", resp.ID)
+	}
+	if resp.ImageURL != imageURL {
+		t.Errorf("expected imageUrl %q, got %q", imageURL, resp.ImageURL)
+	}
+}
+
 func TestLoginHandler_Success_ReturnsTokenAndUserID(t *testing.T) {
 	h := newAuthHandlers(t)
 
