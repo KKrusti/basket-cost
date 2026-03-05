@@ -1,9 +1,23 @@
 import type { SearchResult, Product, TicketUploadResult, TicketUploadSummary, AnalyticsResult } from '../types';
 
 const API_BASE = '/api';
+const AUTH_STORAGE_KEY = 'mercaflacion_auth';
 
 const READ_TIMEOUT_MS = 15_000;
 const UPLOAD_TIMEOUT_MS = 60_000;
+
+function authHeaders(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+    if (raw) {
+      const { token } = JSON.parse(raw) as { token?: string };
+      if (token) return { Authorization: `Bearer ${token}` };
+    }
+  } catch {
+    // ignore corrupt storage
+  }
+  return {};
+}
 
 // Returns an AbortSignal that fires after `ms` milliseconds, plus a cleanup fn.
 function withTimeout(ms: number): { signal: AbortSignal; clear: () => void } {
@@ -28,7 +42,10 @@ function friendlyUploadError(status: number, body: string): string {
 export async function searchProducts(query: string): Promise<SearchResult[]> {
   const { signal, clear } = withTimeout(READ_TIMEOUT_MS);
   try {
-    const res = await fetch(`${API_BASE}/products?q=${encodeURIComponent(query)}`, { signal });
+    const res = await fetch(`${API_BASE}/products?q=${encodeURIComponent(query)}`, {
+      signal,
+      headers: authHeaders(),
+    });
     if (!res.ok) throw new Error(`Search failed: ${res.statusText}`);
     return res.json();
   } finally {
@@ -43,7 +60,10 @@ export async function getAllProducts(): Promise<SearchResult[]> {
 export async function getProduct(id: string): Promise<Product> {
   const { signal, clear } = withTimeout(READ_TIMEOUT_MS);
   try {
-    const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, { signal });
+    const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}`, {
+      signal,
+      headers: authHeaders(),
+    });
     if (!res.ok) throw new Error(`Product not found: ${res.statusText}`);
     return res.json();
   } finally {
@@ -59,7 +79,7 @@ export async function uploadTicket(file: File): Promise<TicketUploadResult> {
     const res = await fetch(`${API_BASE}/tickets`, {
       method: 'POST',
       body: form,
-      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      headers: { 'X-Requested-With': 'XMLHttpRequest', ...authHeaders() },
       signal,
     });
     if (!res.ok) {
@@ -103,10 +123,28 @@ export async function uploadTickets(
   };
 }
 
+export async function updateProductImage(id: string, imageUrl: string): Promise<void> {
+  const { signal, clear } = withTimeout(READ_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}/products/${encodeURIComponent(id)}/image`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ imageUrl }),
+      signal,
+    });
+    if (!res.ok) throw new Error(`Update image failed: ${res.statusText}`);
+  } finally {
+    clear();
+  }
+}
+
 export async function getAnalytics(): Promise<AnalyticsResult> {
   const { signal, clear } = withTimeout(READ_TIMEOUT_MS);
   try {
-    const res = await fetch(`${API_BASE}/analytics`, { signal });
+    const res = await fetch(`${API_BASE}/analytics`, {
+      signal,
+      headers: authHeaders(),
+    });
     if (!res.ok) throw new Error(`Analytics failed: ${res.statusText}`);
     return res.json();
   } finally {

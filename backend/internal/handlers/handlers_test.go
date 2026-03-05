@@ -533,7 +533,8 @@ func TestTicketHandler_FileMarkedProcessedAfterSuccessfulImport(t *testing.T) {
 	}
 
 	// The filename used by buildMultipartRequest is "ticket.pdf".
-	processed, err := s.IsFileProcessed("ticket.pdf")
+	// The request has no JWT so UserIDFromContext returns 0.
+	processed, err := s.IsFileProcessed(0, "ticket.pdf")
 	if err != nil {
 		t.Fatalf("IsFileProcessed: %v", err)
 	}
@@ -621,5 +622,291 @@ func TestAnalyticsHandler_MostPurchasedPopulated(t *testing.T) {
 		if item.PurchaseCount <= 0 {
 			t.Errorf("product %q: PurchaseCount should be > 0, got %d", item.ID, item.PurchaseCount)
 		}
+	}
+}
+
+// --- RegisterHandler ---
+
+func newAuthHandlers(t *testing.T) *handlers.Handlers {
+	t.Helper()
+	db := mustOpenMemDB(t)
+	s := store.New(db)
+	return handlers.New(s, nil, nil)
+}
+
+func jsonBody(t *testing.T, v any) *bytes.Buffer {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	return bytes.NewBuffer(b)
+}
+
+func TestRegisterHandler_MethodNotAllowed(t *testing.T) {
+	h := newAuthHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/register", nil)
+	w := httptest.NewRecorder()
+	h.RegisterHandler(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestRegisterHandler_MissingBody_ReturnsBadRequest(t *testing.T) {
+	h := newAuthHandlers(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", bytes.NewBufferString("not-json"))
+	w := httptest.NewRecorder()
+	h.RegisterHandler(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestRegisterHandler_ShortUsername_ReturnsBadRequest(t *testing.T) {
+	h := newAuthHandlers(t)
+	body := jsonBody(t, map[string]string{"username": "ab", "password": "password123"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	w := httptest.NewRecorder()
+	h.RegisterHandler(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for short username, got %d", w.Code)
+	}
+}
+
+func TestRegisterHandler_ShortPassword_ReturnsBadRequest(t *testing.T) {
+	h := newAuthHandlers(t)
+	body := jsonBody(t, map[string]string{"username": "validuser", "password": "short"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	w := httptest.NewRecorder()
+	h.RegisterHandler(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for short password, got %d", w.Code)
+	}
+}
+
+func TestRegisterHandler_Success_ReturnsCreatedWithToken(t *testing.T) {
+	h := newAuthHandlers(t)
+	body := jsonBody(t, map[string]string{"username": "testuser", "password": "securepassword"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
+	w := httptest.NewRecorder()
+	h.RegisterHandler(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Token    string `json:"token"`
+		UserID   int64  `json:"userId"`
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Token == "" {
+		t.Error("expected non-empty token")
+	}
+	if resp.UserID == 0 {
+		t.Error("expected non-zero userID")
+	}
+	if resp.Username != "testuser" {
+		t.Errorf("expected username 'testuser', got %q", resp.Username)
+	}
+}
+
+func TestRegisterHandler_DuplicateUsername_ReturnsConflict(t *testing.T) {
+	h := newAuthHandlers(t)
+	body1 := jsonBody(t, map[string]string{"username": "dupeuser", "password": "securepassword"})
+	req1 := httptest.NewRequest(http.MethodPost, "/api/auth/register", body1)
+	w1 := httptest.NewRecorder()
+	h.RegisterHandler(w1, req1)
+	if w1.Code != http.StatusCreated {
+		t.Fatalf("first register: expected 201, got %d", w1.Code)
+	}
+
+	body2 := jsonBody(t, map[string]string{"username": "dupeuser", "password": "anotherpassword"})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/register", body2)
+	w2 := httptest.NewRecorder()
+	h.RegisterHandler(w2, req2)
+	if w2.Code != http.StatusConflict {
+		t.Errorf("duplicate register: expected 409, got %d", w2.Code)
+	}
+}
+
+// --- LoginHandler ---
+
+func TestLoginHandler_MethodNotAllowed(t *testing.T) {
+	h := newAuthHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/login", nil)
+	w := httptest.NewRecorder()
+	h.LoginHandler(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestLoginHandler_InvalidCredentials_ReturnsUnauthorized(t *testing.T) {
+	h := newAuthHandlers(t)
+
+	// Register first.
+	reg := jsonBody(t, map[string]string{"username": "loginuser", "password": "correctpassword"})
+	h.RegisterHandler(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/auth/register", reg))
+
+	// Login with wrong password.
+	body := jsonBody(t, map[string]string{"username": "loginuser", "password": "wrongpassword"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	w := httptest.NewRecorder()
+	h.LoginHandler(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestLoginHandler_UnknownUser_ReturnsUnauthorized(t *testing.T) {
+	h := newAuthHandlers(t)
+	body := jsonBody(t, map[string]string{"username": "nobody", "password": "doesntmatter"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	w := httptest.NewRecorder()
+	h.LoginHandler(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// --- ProductRouter ---
+
+func TestProductRouter_DispatchesGetToProductHandler(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/products/1", nil)
+	w := httptest.NewRecorder()
+	h.ProductRouter(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestProductRouter_DispatchesPatchImageToImageHandler(t *testing.T) {
+	h := newHandlers(t)
+	body := jsonBody(t, map[string]string{"imageUrl": "https://prod-mercadona.imgix.net/img.jpg"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	w := httptest.NewRecorder()
+	h.ProductRouter(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestProductRouter_WrongMethodForProduct_Returns405(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodDelete, "/api/products/1", nil)
+	w := httptest.NewRecorder()
+	h.ProductRouter(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+// --- ProductImageHandler ---
+
+func TestProductImageHandler_MethodNotAllowed(t *testing.T) {
+	h := newHandlers(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/products/1/image", nil)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestProductImageHandler_MissingImageURL_ReturnsBadRequest(t *testing.T) {
+	h := newHandlers(t)
+	body := jsonBody(t, map[string]string{"imageUrl": ""})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestProductImageHandler_ProductNotFound_Returns404(t *testing.T) {
+	h := newHandlers(t)
+	body := jsonBody(t, map[string]string{"imageUrl": "https://prod-mercadona.imgix.net/img.jpg"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/9999/image", body)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestProductImageHandler_ValidRequest_ReturnsOK(t *testing.T) {
+	h := newHandlers(t)
+	imageURL := "https://prod-mercadona.imgix.net/images/img.jpg"
+	body := jsonBody(t, map[string]string{"imageUrl": imageURL})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		ID       string `json:"id"`
+		ImageURL string `json:"imageUrl"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.ID != "1" {
+		t.Errorf("expected id '1', got %q", resp.ID)
+	}
+	if resp.ImageURL != imageURL {
+		t.Errorf("expected imageUrl %q, got %q", imageURL, resp.ImageURL)
+	}
+}
+
+func TestLoginHandler_Success_ReturnsTokenAndUserID(t *testing.T) {
+	h := newAuthHandlers(t)
+
+	// Register.
+	reg := jsonBody(t, map[string]string{"username": "loginok", "password": "correctpassword"})
+	regReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", reg)
+	regW := httptest.NewRecorder()
+	h.RegisterHandler(regW, regReq)
+	if regW.Code != http.StatusCreated {
+		t.Fatalf("register: expected 201, got %d", regW.Code)
+	}
+	var regResp struct {
+		UserID int64 `json:"userId"`
+	}
+	if err := json.NewDecoder(regW.Body).Decode(&regResp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+
+	// Login.
+	body := jsonBody(t, map[string]string{"username": "loginok", "password": "correctpassword"})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
+	w := httptest.NewRecorder()
+	h.LoginHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Token    string `json:"token"`
+		UserID   int64  `json:"userId"`
+		Username string `json:"username"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+	if resp.Token == "" {
+		t.Error("expected non-empty token")
+	}
+	if resp.UserID != regResp.UserID {
+		t.Errorf("userID mismatch: register=%d, login=%d", regResp.UserID, resp.UserID)
+	}
+	if resp.Username != "loginok" {
+		t.Errorf("expected username 'loginok', got %q", resp.Username)
 	}
 }

@@ -104,5 +104,51 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("migrate m3: %w", err)
 	}
 
+	// m4: user accounts for multi-tenant support.
+	m4 := `
+		CREATE TABLE IF NOT EXISTS users (
+			id            INTEGER PRIMARY KEY AUTOINCREMENT,
+			username      TEXT    NOT NULL UNIQUE,
+			password_hash TEXT    NOT NULL,
+			created_at    TEXT    NOT NULL  -- ISO-8601 timestamp
+		);
+	`
+	if _, err := db.Exec(m4); err != nil {
+		return fmt.Errorf("migrate m4: %w", err)
+	}
+
+	// m5: associate price_records and processed_files with a user.
+	// NULL means the record belongs to no specific user (legacy seed data).
+	if err := addColumnIfMissing(db, "price_records", "user_id",
+		`ALTER TABLE price_records ADD COLUMN user_id INTEGER REFERENCES users(id)`); err != nil {
+		return fmt.Errorf("migrate m5 price_records.user_id: %w", err)
+	}
+	if err := addColumnIfMissing(db, "processed_files", "user_id",
+		`ALTER TABLE processed_files ADD COLUMN user_id INTEGER REFERENCES users(id)`); err != nil {
+		return fmt.Errorf("migrate m5 processed_files.user_id: %w", err)
+	}
+
+	// m6: allow manual image URL pinning so the enricher won't overwrite it.
+	if err := addColumnIfMissing(db, "products", "image_url_locked",
+		`ALTER TABLE products ADD COLUMN image_url_locked INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("migrate m6 products.image_url_locked: %w", err)
+	}
+
 	return nil
+}
+
+// addColumnIfMissing adds a column to a table only when it does not exist yet.
+// SQLite does not support IF NOT EXISTS on ALTER TABLE ADD COLUMN.
+func addColumnIfMissing(db *sql.DB, table, column, alterSQL string) error {
+	var count int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, table, column,
+	).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		_, err = db.Exec(alterSQL)
+	}
+	return err
 }

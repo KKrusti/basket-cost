@@ -2,6 +2,14 @@ package models
 
 import "time"
 
+// User represents an application user account.
+type User struct {
+	ID           int64     `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"` // never serialised to JSON
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 // PriceRecord represents a single price observation for a product,
 // typically extracted from a digital receipt/ticket.
 type PriceRecord struct {
@@ -12,12 +20,13 @@ type PriceRecord struct {
 
 // Product represents a grocery item with its price history.
 type Product struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	Category     string        `json:"category,omitempty"`
-	ImageURL     string        `json:"imageUrl,omitempty"`
-	CurrentPrice float64       `json:"currentPrice"`
-	PriceHistory []PriceRecord `json:"priceHistory"`
+	ID             string        `json:"id"`
+	Name           string        `json:"name"`
+	Category       string        `json:"category,omitempty"`
+	ImageURL       string        `json:"imageUrl,omitempty"`
+	ImageURLLocked bool          `json:"imageUrlLocked"`
+	CurrentPrice   float64       `json:"currentPrice"`
+	PriceHistory   []PriceRecord `json:"priceHistory"`
 }
 
 // SearchResult is a lightweight version of Product returned in search listings.

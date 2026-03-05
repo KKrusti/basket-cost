@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"basket-cost/internal/auth"
 	"basket-cost/internal/models"
 	"basket-cost/internal/store"
 	"basket-cost/internal/ticket"
@@ -10,12 +11,26 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/time/rate"
 )
 
 const pdfMagic = "%PDF-"
+
+// UserIDContextKey is the context key used to pass the authenticated user ID
+// between the auth middleware (in cmd/server) and the HTTP handlers.
+// It is exported so the middleware can set it without an import cycle.
+type UserIDContextKey struct{}
+
+// UserIDFromContext extracts the authenticated user ID from the request context.
+// Returns 0 if no user ID is present (unauthenticated request).
+func UserIDFromContext(r *http.Request) int64 {
+	v, _ := r.Context().Value(UserIDContextKey{}).(int64)
+	return v
+}
 
 // EnrichScheduler is the subset of *enricher.Enricher used by Handlers.
 // Defined as an interface so tests can inject a fake without network calls.
@@ -46,13 +61,130 @@ func NewWithLimiter(s store.Store, imp *ticket.Importer, enr EnrichScheduler, li
 	return &Handlers{store: s, importer: imp, enricher: enr, ticketLimiter: lim}
 }
 
+// --- Auth handlers ---
+
+type registerRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type loginResponse struct {
+	Token    string `json:"token"`
+	UserID   int64  `json:"userId"`
+	Username string `json:"username"`
+}
+
+func (h *Handlers) RegisterHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req registerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	req.Username = strings.TrimSpace(req.Username)
+	if req.Username == "" || utf8.RuneCountInString(req.Username) < 3 {
+		http.Error(w, "Bad request: username must be at least 3 characters", http.StatusBadRequest)
+		return
+	}
+	if len(req.Password) < 8 {
+		http.Error(w, "Bad request: password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		log.Printf("handlers: hash password: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	userID, err := h.store.CreateUser(req.Username, hash)
+	if err != nil {
+		// Treat duplicate username as a client error.
+		if strings.Contains(err.Error(), "UNIQUE") {
+			http.Error(w, "Conflict: username already taken", http.StatusConflict)
+			return
+		}
+		log.Printf("handlers: create user: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	token, err := auth.GenerateToken(userID)
+	if err != nil {
+		log.Printf("handlers: generate token: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(loginResponse{Token: token, UserID: userID, Username: req.Username}); err != nil {
+		log.Printf("handlers: encode register response: %v", err)
+	}
+}
+
+func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req registerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.store.GetUserByUsername(strings.TrimSpace(req.Username))
+	if err != nil {
+		log.Printf("handlers: get user: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if user == nil || auth.CheckPassword(req.Password, user.PasswordHash) != nil {
+		http.Error(w, "Unauthorized: invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := auth.GenerateToken(user.ID)
+	if err != nil {
+		log.Printf("handlers: generate token: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(loginResponse{Token: token, UserID: user.ID, Username: user.Username}); err != nil {
+		log.Printf("handlers: encode login response: %v", err)
+	}
+}
+
+// --- Product handlers ---
+
+// ProductRouter dispatches /api/products/{id} and /api/products/{id}/image
+// to the appropriate handler based on the request method and path suffix.
+func (h *Handlers) ProductRouter(w http.ResponseWriter, r *http.Request) {
+	if strings.HasSuffix(r.URL.Path, "/image") {
+		h.ProductImageHandler(w, r)
+		return
+	}
+	h.ProductHandler(w, r)
+}
+
 func (h *Handlers) SearchHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	results, err := h.store.SearchProducts(r.URL.Query().Get("q"))
+	userID := UserIDFromContext(r)
+	results, err := h.store.SearchProducts(userID, r.URL.Query().Get("q"))
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -92,6 +224,60 @@ func (h *Handlers) ProductHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+type productImageRequest struct {
+	ImageURL string `json:"imageUrl"`
+}
+
+// ProductImageHandler handles PATCH /api/products/{id}/image.
+// It sets a manually provided image URL and locks the product so the enricher
+// will not overwrite it in future runs.
+func (h *Handlers) ProductImageHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Path: /api/products/{id}/image — strip prefix and suffix.
+	trimmed := strings.TrimPrefix(r.URL.Path, "/api/products/")
+	id := strings.TrimSuffix(trimmed, "/image")
+	if id == "" {
+		http.Error(w, "Product ID required", http.StatusBadRequest)
+		return
+	}
+
+	var req productImageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
+		return
+	}
+	req.ImageURL = strings.TrimSpace(req.ImageURL)
+	if req.ImageURL == "" {
+		http.Error(w, "Bad request: imageUrl is required", http.StatusBadRequest)
+		return
+	}
+
+	product, err := h.store.GetProductByID(id)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if product == nil {
+		http.Error(w, "Product not found", http.StatusNotFound)
+		return
+	}
+
+	if err := h.store.SetProductImageURLManual(id, req.ImageURL); err != nil {
+		log.Printf("handlers: set manual image for %s: %v", id, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"id": id, "imageUrl": req.ImageURL}); err != nil {
+		log.Printf("handlers: encode image response: %v", err)
+	}
+}
+
 type ticketResponse struct {
 	InvoiceNumber string `json:"invoiceNumber"`
 	LinesImported int    `json:"linesImported"`
@@ -113,6 +299,8 @@ func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID := UserIDFromContext(r)
+
 	const maxUploadSize = 10 << 20
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		http.Error(w, "Bad request: could not parse form", http.StatusBadRequest)
@@ -128,7 +316,7 @@ func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 
 	filename := header.Filename
 
-	already, err := h.store.IsFileProcessed(filename)
+	already, err := h.store.IsFileProcessed(userID, filename)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -150,14 +338,14 @@ func (h *Handlers) TicketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.importer.Import(bytes.NewReader(data), int64(len(data)))
+	result, err := h.importer.Import(userID, bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		log.Printf("handlers: ticket import failed for %q: %v", filename, err)
 		http.Error(w, "Unprocessable entity: could not parse the PDF as a Mercadona receipt", http.StatusUnprocessableEntity)
 		return
 	}
 
-	if err := h.store.MarkFileProcessed(filename, time.Now()); err != nil {
+	if err := h.store.MarkFileProcessed(userID, filename, time.Now()); err != nil {
 		// Non-fatal: the import succeeded; log and continue.
 		log.Printf("handlers: could not mark file processed %q: %v", filename, err)
 	}
@@ -186,13 +374,15 @@ func (h *Handlers) AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mostPurchased, err := h.store.GetMostPurchased(analyticsLimit)
+	userID := UserIDFromContext(r)
+
+	mostPurchased, err := h.store.GetMostPurchased(userID, analyticsLimit)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	biggestIncreases, err := h.store.GetBiggestPriceIncreases(analyticsLimit)
+	biggestIncreases, err := h.store.GetBiggestPriceIncreases(userID, analyticsLimit)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return

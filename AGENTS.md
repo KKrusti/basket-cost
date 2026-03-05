@@ -358,7 +358,7 @@ Inline arrow functions within components are acceptable for simple formatters (`
 
 ## Language
 
-- UI text, labels, and user-facing strings must be in **Spanish** — the app targets the Spanish grocery market.
+- UI text, labels, y los mensajes hacia el usuario deben estar en **español**.
 - Code identifiers, comments, and commit messages may be in English or Spanish; be consistent within a file.
 
 ---
@@ -368,3 +368,15 @@ Inline arrow functions within components are acceptable for simple formatters (`
 `node_modules` is installed in a Linux-native path (`/home/carlos/.npm-workspaces/basket-cost/node_modules`) and symlinked into `frontend/node_modules` to avoid NTFS `chmod` errors. This is handled automatically by `task dev:deps`. Do not delete or recreate `frontend/node_modules` as a real directory — keep it as a symlink.
 
 Use 'bd' for task tracking
+
+---
+
+### Gestión de tareas con `bd`
+
+Antes de ejecutar cualquier tarea del plan, crea un issue en Beads usando `bd new`.
+Marca cada tarea como `in-progress` con `bd start <id>` al comenzarla.
+Al terminar la sesión, ejecuta `bd ready` para ver qué queda pendiente.
+
+Además, al final de **cada tarea completada**, escribe un resumen del estado en **PROGRESS.md**.
+Antes de empezar una nueva subtarea, crea el issue en Beads con `bd new`.
+Si la sesión se interrumpe, el archivo **PROGRESS.md** debe ser suficiente para retomar el trabajo desde cero.

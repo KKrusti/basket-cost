@@ -64,6 +64,18 @@ tasks:
     cmds:
       - go run ./cmd/enrich/main.go -db basket-cost.db
 
+  test:e2e:
+    desc: Ejecuta los tests E2E con Playwright (headless, Chromium + móvil Poco X6 Pro)
+    dir: frontend
+    cmds:
+      - npm run test:e2e
+
+  test:e2e:headed:
+    desc: Ejecuta los tests E2E con Playwright en modo headed (ventana visible)
+    dir: frontend
+    cmds:
+      - npm run test:e2e:headed
+
   db:reset:
     desc: "Borra todo el contenido de la base de datos (productos, precios e historial de tickets)"
     dir: backend

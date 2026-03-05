@@ -61,3 +61,13 @@ export interface AnalyticsResult {
   mostPurchased: MostPurchasedProduct[];
   biggestIncreases: PriceIncreaseProduct[];
 }
+
+export interface User {
+  userId: number;
+  username: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  token: string | null;
+}
