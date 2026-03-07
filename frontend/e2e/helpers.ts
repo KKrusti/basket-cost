@@ -95,6 +95,58 @@ export async function stubAuth(page: Page) {
   );
 }
 
+// Stubs GET /api/household with members and DELETE to succeed.
+export async function stubHouseholdMembers(page: Page) {
+  await page.route('/api/household', (route) => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ members: [
+          { id: 1, username: 'testuser' },
+          { id: 2, username: 'alice' },
+        ]}),
+      });
+    }
+    if (route.request().method() === 'DELETE') {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    }
+    return route.fallback();
+  });
+}
+
+// Stubs GET /api/household with an empty household (solo user, not in any household).
+export async function stubHouseholdEmpty(page: Page) {
+  await page.route('/api/household', (route) => {
+    if (route.request().method() === 'GET') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ members: [] }),
+      });
+    }
+    return route.fallback();
+  });
+}
+
+// Stubs POST /api/household/invite to return a token.
+export async function stubCreateInvitation(page: Page, token = 'invite-tok-123') {
+  await page.route('/api/household/invite', (route) =>
+    route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify({ token }),
+    }),
+  );
+}
+
+// Stubs POST /api/household/accept to succeed.
+export async function stubAcceptInvitation(page: Page) {
+  await page.route('/api/household/accept*', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+  );
+}
+
 // Stubs /api/analytics.
 export async function stubAnalytics(page: Page) {
   await page.route('/api/analytics', (route) =>

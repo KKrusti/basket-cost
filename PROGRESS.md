@@ -56,9 +56,7 @@ Se ha implementado soporte multi-tenant completo en el backend. Todos los tests 
 
 ### Próximos pasos (frontend)
 
-- Pantalla de login/registro.
-- Almacenar JWT en `localStorage`.
-- Incluir `Authorization: Bearer <token>` en llamadas a la API.
+Completado en sesión 2026-03-07 — ver entrada siguiente.
 
 ### Tests (todos pasan)
 
@@ -68,4 +66,53 @@ ok  basket-cost/internal/handlers  (todos pasan, 10 nuevos auth tests)
 ok  basket-cost/internal/store     (todos pasan)
 ok  basket-cost/internal/ticket    (todos pasan)
 ok  basket-cost/internal/enricher  (todos pasan)
+```
+
+---
+
+## Sesión: Household UI + e2e + Auto-traducción catalan (2026-03-07)
+
+### Estado actual: COMPLETADO — no hay tareas pendientes
+
+### Tareas completadas
+
+#### basket-cost-2wk + basket-cost-3st (cerradas como ya implementadas)
+Los componentes `HouseholdSection.tsx` y `AcceptInviteModal.tsx` ya estaban implementados con sus tests unitarios y estilos CSS. Se cerraron al verificar que el trabajo estaba completo.
+
+#### basket-cost-mvo — e2e: household invitation and shared purchases tests
+
+**Archivos modificados:**
+- `frontend/e2e/helpers.ts`: Añadidos stubs `stubHouseholdMembers`, `stubHouseholdEmpty`, `stubCreateInvitation`, `stubAcceptInvitation`. Se usa `route.fallback()` (no `route.continue()`) para que los stubs se encadenen correctamente en Playwright.
+- `frontend/e2e/household.spec.ts` (nuevo): 15 tests × 2 dispositivos = 30 tests. Cubre:
+  - Sección "Unidad familiar" en el menú de usuario (miembros, badge "(tú)")
+  - Crear enlace de invitación, botón copiar, error al fallar
+  - Abandonar unidad: cierra el menú / muestra error
+  - Flujo `/?invite=TOKEN`: modal visible cuando autenticado, no visible sin sesión
+  - Aceptar invitación: llama al endpoint correcto, muestra error si expirada
+
+**Truco para test "sin sesión":** Se usa un segundo `page.addInitScript` en el `test.describe` interior que elimina la clave de auth de localStorage, contrarrestando el `loginViaStorage` del `beforeEach` exterior.
+
+#### basket-cost-urv — Auto-traducción de nombres catalanes via API
+
+**Archivos creados/modificados:**
+- `internal/enricher/translator.go` (nuevo):
+  - Interfaz `Translator` con método `Translate(ctx, text) (string, error)`
+  - `MyMemoryTranslator`: llama a `api.mymemory.translated.net` (ca→es, free, sin API key), caché en `sync.Map`, `baseURL` configurable para tests
+  - `NoopTranslator`: devuelve el texto sin cambios (tests/fallback)
+- `internal/enricher/enricher.go`:
+  - Campo `translator Translator` en el struct `Enricher`
+  - `New(s)` usa `NewMyMemoryTranslator()` por defecto
+  - `newEnricher(s, t)` constructor interno para inyectar mock en tests
+  - Nuevo método `productKeywords(ctx, name)`: intenta traducir con el API; si falla, hace fallback al diccionario `catalanToSpanish`
+  - `Run()` usa `productKeywords` en lugar de `translateCatalan` directamente
+- `internal/enricher/translator_test.go` (nuevo): 11 tests — NoopTranslator, MyMemoryTranslator (éxito, caché, error HTTP, traducción vacía), `productKeywords` (usa translator, fallback al dict, non-catalan preservado)
+
+**Diseño:** El diccionario manual (`catalan_dict.go`) se mantiene como fallback. Si la API de MyMemory no está disponible o falla, el enricher sigue funcionando sin degradación. La traducción ocurre a nivel de nombre completo (no token a token), lo que da mejor contexto al API de traducción.
+
+### Tests finales
+
+```
+Backend: ok  basket-cost/internal/enricher  (todos pasan, incluidos 11 nuevos)
+Frontend unit: 161 tests — 14 archivos — todos pasan
+E2E: 122 passed, 2 skipped (columnas en móvil, esperado)
 ```

@@ -54,8 +54,9 @@ const indexTTL = 24 * time.Hour
 // uploads always result in at most one active Run() plus one queued — never
 // a burst of parallel requests to the Mercadona API.
 type Enricher struct {
-	client *MercadonaClient
-	store  store.Store
+	client     *MercadonaClient
+	store      store.Store
+	translator Translator
 
 	mu             sync.Mutex // guards cachedIndex and indexFetchedAt
 	cachedIndex    ProductIndex
@@ -67,13 +68,21 @@ type Enricher struct {
 	pending chan struct{}
 }
 
-// New returns an Enricher backed by the given store.
+// New returns an Enricher backed by the given store using the MyMemory
+// translation API (Catalan→Spanish) for product name normalisation.
 // Call Start to launch the background worker before using Schedule.
 func New(s store.Store) *Enricher {
+	return newEnricher(s, NewMyMemoryTranslator())
+}
+
+// newEnricher is the internal constructor that accepts a custom Translator.
+// Used in tests to inject a mock and in New to wire the production client.
+func newEnricher(s store.Store, t Translator) *Enricher {
 	return &Enricher{
-		client:  NewMercadonaClient(),
-		store:   s,
-		pending: make(chan struct{}, 1),
+		client:     NewMercadonaClient(),
+		store:      s,
+		translator: t,
+		pending:    make(chan struct{}, 1),
 	}
 }
 
@@ -157,7 +166,7 @@ func (e *Enricher) Run(ctx context.Context) (EnrichResult, error) {
 	res.Total = len(results)
 
 	for _, p := range results {
-		localKW := keywords(translateCatalan(normalise(p.Name)))
+		localKW := e.productKeywords(ctx, p.Name)
 		if len(localKW) == 0 {
 			res.Skipped++
 			continue
@@ -175,6 +184,22 @@ func (e *Enricher) Run(ctx context.Context) (EnrichResult, error) {
 	}
 
 	return res, nil
+}
+
+// productKeywords returns the significant keywords for a raw product name.
+// It attempts to translate the name from Catalan to Spanish using the
+// configured Translator; if translation fails it falls back to the built-in
+// dictionary so the enrichment run is never blocked by API unavailability.
+func (e *Enricher) productKeywords(ctx context.Context, name string) []string {
+	normalised := normalise(name)
+
+	translated, err := e.translator.Translate(ctx, normalised)
+	if err != nil {
+		log.Printf("enricher: translation failed for %q, falling back to dictionary: %v", name, err)
+		translated = translateCatalan(normalised)
+	}
+
+	return keywords(translated)
 }
 
 // bestMatch finds the ProductEntry whose keyword set best overlaps with the

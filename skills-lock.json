@@ -11,6 +11,11 @@
       "sourceType": "github",
       "computedHash": "41effcb704d0836720d02ff497a8b4b5c76e41491612c22b36f67d87b42d3744"
     },
+    "security-best-practices": {
+      "source": "supercent-io/skills-template",
+      "sourceType": "github",
+      "computedHash": "a8c825eb0f2d2d3381f93dad83ea531579445c5646b38be0170f4a782689cf4b"
+    },
     "ui-ux-pro-max": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
