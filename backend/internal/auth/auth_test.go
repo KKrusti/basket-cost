@@ -58,17 +58,23 @@ func TestGenerateToken_And_ValidateToken(t *testing.T) {
 		t.Fatal("expected non-empty token")
 	}
 
-	got, err := auth.ValidateToken(token)
+	gotID, jti, exp, err := auth.ValidateToken(token)
 	if err != nil {
 		t.Fatalf("ValidateToken: %v", err)
 	}
-	if got != userID {
-		t.Errorf("ValidateToken: want userID=%d, got %d", userID, got)
+	if gotID != userID {
+		t.Errorf("ValidateToken: want userID=%d, got %d", userID, gotID)
+	}
+	if jti == "" {
+		t.Error("ValidateToken: expected non-empty jti")
+	}
+	if exp.IsZero() {
+		t.Error("ValidateToken: expected non-zero expiresAt")
 	}
 }
 
 func TestValidateToken_InvalidToken_ReturnsError(t *testing.T) {
-	_, err := auth.ValidateToken("not.a.valid.jwt")
+	_, _, _, err := auth.ValidateToken("not.a.valid.jwt")
 	if err == nil {
 		t.Error("expected error for invalid token, got nil")
 	}
@@ -80,7 +86,7 @@ func TestValidateToken_TamperedToken_ReturnsError(t *testing.T) {
 		t.Fatalf("GenerateToken: %v", err)
 	}
 	// Corrupt the signature by appending an extra character.
-	_, err = auth.ValidateToken(token + "x")
+	_, _, _, err = auth.ValidateToken(token + "x")
 	if err == nil {
 		t.Error("expected error for tampered token, got nil")
 	}

@@ -2,6 +2,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -12,7 +14,7 @@ import (
 )
 
 const (
-	tokenTTL      = 72 * time.Hour
+	tokenTTL      = 24 * time.Hour // reduced from 72h for tighter expiry
 	bcryptCost    = 12
 	jwtSecretEnv  = "JWT_SECRET"
 	defaultSecret = "change-me-in-production"
@@ -46,12 +48,27 @@ type claims struct {
 	jwt.RegisteredClaims
 }
 
+// generateJTI returns a cryptographically random 16-byte hex string used as
+// the JWT ID (jti claim) for token revocation support.
+func generateJTI() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate jti: %w", err)
+	}
+	return hex.EncodeToString(b), nil
+}
+
 // GenerateToken creates a signed JWT for the given user ID valid for tokenTTL.
 func GenerateToken(userID int64) (string, error) {
+	jti, err := generateJTI()
+	if err != nil {
+		return "", err
+	}
 	now := time.Now()
 	c := claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			ID:        jti,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(tokenTTL)),
 		},
@@ -63,9 +80,9 @@ func GenerateToken(userID int64) (string, error) {
 	return tok, nil
 }
 
-// ValidateToken parses and validates a JWT string, returning the user ID
-// embedded in the token claims on success.
-func ValidateToken(tokenStr string) (int64, error) {
+// ValidateToken parses and validates a JWT string, returning the user ID,
+// JTI (unique token identifier used for revocation), and expiry time on success.
+func ValidateToken(tokenStr string) (userID int64, jti string, expiresAt time.Time, err error) {
 	tok, err := jwt.ParseWithClaims(tokenStr, &claims{}, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
@@ -73,12 +90,17 @@ func ValidateToken(tokenStr string) (int64, error) {
 		return jwtSecret(), nil
 	})
 	if err != nil {
-		return 0, fmt.Errorf("parse token: %w", err)
+		return 0, "", time.Time{}, fmt.Errorf("parse token: %w", err)
 	}
 
 	c, ok := tok.Claims.(*claims)
 	if !ok || !tok.Valid {
-		return 0, errors.New("invalid token claims")
+		return 0, "", time.Time{}, errors.New("invalid token claims")
 	}
-	return c.UserID, nil
+
+	var exp time.Time
+	if c.ExpiresAt != nil {
+		exp = c.ExpiresAt.Time
+	}
+	return c.UserID, c.RegisteredClaims.ID, exp, nil
 }

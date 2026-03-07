@@ -9,16 +9,80 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
 const pdfMagic = "%PDF-"
+
+// maxJSONBodyBytes is the maximum size accepted for JSON request bodies.
+// Prevents resource exhaustion from oversized payloads.
+const maxJSONBodyBytes = 1 << 20 // 1 MB
+
+// emailRegex is a lightweight format check — not RFC 5322 complete, but
+// catches obvious non-email strings without importing a heavy validator.
+var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
+
+// decodeJSONBody wraps r.Body with a size limit, then JSON-decodes into v.
+// Returns false and writes an HTTP error when the body is too large or malformed.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		if strings.Contains(err.Error(), "http: request body too large") {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
+		}
+		return false
+	}
+	return true
+}
+
+// validatePasswordComplexity returns an error message when the password does
+// not meet the minimum requirements, or an empty string when it is valid.
+func validatePasswordComplexity(p string) string {
+	if len(p) < 8 {
+		return "la contraseña debe tener al menos 8 caracteres"
+	}
+	var hasUpper, hasLower, hasDigit bool
+	for _, r := range p {
+		switch {
+		case unicode.IsUpper(r):
+			hasUpper = true
+		case unicode.IsLower(r):
+			hasLower = true
+		case unicode.IsDigit(r):
+			hasDigit = true
+		}
+	}
+	if !hasUpper || !hasLower || !hasDigit {
+		return "la contraseña debe contener mayúsculas, minúsculas y un número"
+	}
+	return ""
+}
+
+// validateImageURL returns an error when raw is not a valid http(s) URL.
+func validateImageURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("URL inválida")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("el scheme de la URL debe ser http o https")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("la URL debe incluir un host")
+	}
+	return nil
+}
 
 // UserIDContextKey is the context key used to pass the authenticated user ID
 // between the auth middleware (in cmd/server) and the HTTP handlers.
@@ -78,8 +142,7 @@ func (h *Handlers) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req registerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -88,8 +151,13 @@ func (h *Handlers) RegisterHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Bad request: username must be at least 3 characters", http.StatusBadRequest)
 		return
 	}
-	if len(req.Password) < 8 {
-		http.Error(w, "Bad request: password must be at least 8 characters", http.StatusBadRequest)
+	if msg := validatePasswordComplexity(req.Password); msg != "" {
+		http.Error(w, "Bad request: "+msg, http.StatusBadRequest)
+		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	if req.Email != "" && !emailRegex.MatchString(req.Email) {
+		http.Error(w, "Bad request: email format is invalid", http.StatusBadRequest)
 		return
 	}
 
@@ -138,8 +206,7 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req registerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -192,13 +259,12 @@ func (h *Handlers) ChangePasswordHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	var req changePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
-	if len(req.NewPassword) < 8 {
-		http.Error(w, "Bad request: new password must be at least 8 characters", http.StatusBadRequest)
+	if msg := validatePasswordComplexity(req.NewPassword); msg != "" {
+		http.Error(w, "Bad request: "+msg, http.StatusBadRequest)
 		return
 	}
 
@@ -310,6 +376,13 @@ func (h *Handlers) ProductImageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Auth check first — before any expensive operations or external calls.
+	imageUserID := UserIDFromContext(r)
+	if imageUserID == 0 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	// Path: /api/products/{id}/image — strip prefix and suffix.
 	trimmed := strings.TrimPrefix(r.URL.Path, "/api/products/")
 	id := strings.TrimSuffix(trimmed, "/image")
@@ -319,8 +392,7 @@ func (h *Handlers) ProductImageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req productImageRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 	req.ImageURL = strings.TrimSpace(req.ImageURL)
@@ -343,7 +415,12 @@ func (h *Handlers) ProductImageHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	imageUserID := UserIDFromContext(r)
+	// Validate the final URL scheme to prevent javascript:, file://, data:, etc.
+	if err := validateImageURL(req.ImageURL); err != nil {
+		http.Error(w, "Bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	product, err := h.store.GetProductByID(imageUserID, id)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -363,6 +440,41 @@ func (h *Handlers) ProductImageHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"id": id, "imageUrl": req.ImageURL}); err != nil {
 		log.Printf("handlers: encode image response: %v", err)
+	}
+}
+
+// LogoutHandler handles POST /api/auth/logout.
+// Revokes the caller's JWT so it cannot be reused even before its expiry.
+func (h *Handlers) LogoutHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	header := r.Header.Get("Authorization")
+	if !strings.HasPrefix(header, "Bearer ") {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	tokenStr := strings.TrimPrefix(header, "Bearer ")
+
+	_, jti, expiresAt, err := auth.ValidateToken(tokenStr)
+	if err != nil || jti == "" {
+		// Token is already invalid; treat logout as successful.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		return
+	}
+
+	if err := h.store.RevokeToken(jti, expiresAt); err != nil {
+		log.Printf("handlers: revoke token: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]bool{"ok": true}); err != nil {
+		log.Printf("handlers: encode logout response: %v", err)
 	}
 }
 

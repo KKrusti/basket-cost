@@ -605,6 +605,33 @@ func newAuthHandlers(t *testing.T) *handlers.Handlers {
 	return handlers.New(s, nil, nil)
 }
 
+// newHandlersWithUser creates a Handlers instance backed by a real user who
+// owns a seeded product. Returns the handlers, store, userID, and product ID.
+// Used by ProductImageHandler tests that now require authentication.
+func newHandlersWithUser(t *testing.T) (*handlers.Handlers, *store.SQLiteStore, int64, string) {
+	t.Helper()
+	db := mustOpenMemDB(t)
+	s := store.New(db)
+
+	uid, err := s.CreateUser("imguser", "", "$2a$12$fakehashfortesting000000000000000000000000000000000000")
+	if err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
+
+	rec := models.PriceRecord{
+		Date:  time.Date(2025, 1, 10, 0, 0, 0, 0, time.UTC),
+		Price: 0.79,
+		Store: "Mercadona",
+	}
+	if err := s.UpsertPriceRecord(uid, "LECHE ENTERA HACENDADO 1L", rec); err != nil {
+		t.Fatalf("seed product: %v", err)
+	}
+
+	// slugify("LECHE ENTERA HACENDADO 1L") → "leche-entera-hacendado-1l"
+	const productID = "leche-entera-hacendado-1l"
+	return handlers.New(s, nil, nil), s, uid, productID
+}
+
 func jsonBody(t *testing.T, v any) *bytes.Buffer {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -636,7 +663,7 @@ func TestRegisterHandler_MissingBody_ReturnsBadRequest(t *testing.T) {
 
 func TestRegisterHandler_ShortUsername_ReturnsBadRequest(t *testing.T) {
 	h := newAuthHandlers(t)
-	body := jsonBody(t, map[string]string{"username": "ab", "password": "password123"})
+	body := jsonBody(t, map[string]string{"username": "ab", "password": "Password123"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	w := httptest.NewRecorder()
 	h.RegisterHandler(w, req)
@@ -658,7 +685,7 @@ func TestRegisterHandler_ShortPassword_ReturnsBadRequest(t *testing.T) {
 
 func TestRegisterHandler_Success_ReturnsCreatedWithToken(t *testing.T) {
 	h := newAuthHandlers(t)
-	body := jsonBody(t, map[string]string{"username": "testuser", "password": "securepassword"})
+	body := jsonBody(t, map[string]string{"username": "testuser", "password": "SecurePass1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/register", body)
 	w := httptest.NewRecorder()
 	h.RegisterHandler(w, req)
@@ -687,7 +714,7 @@ func TestRegisterHandler_Success_ReturnsCreatedWithToken(t *testing.T) {
 
 func TestRegisterHandler_DuplicateUsername_ReturnsConflict(t *testing.T) {
 	h := newAuthHandlers(t)
-	body1 := jsonBody(t, map[string]string{"username": "dupeuser", "password": "securepassword"})
+	body1 := jsonBody(t, map[string]string{"username": "dupeuser", "password": "SecurePass1"})
 	req1 := httptest.NewRequest(http.MethodPost, "/api/auth/register", body1)
 	w1 := httptest.NewRecorder()
 	h.RegisterHandler(w1, req1)
@@ -695,7 +722,7 @@ func TestRegisterHandler_DuplicateUsername_ReturnsConflict(t *testing.T) {
 		t.Fatalf("first register: expected 201, got %d", w1.Code)
 	}
 
-	body2 := jsonBody(t, map[string]string{"username": "dupeuser", "password": "anotherpassword"})
+	body2 := jsonBody(t, map[string]string{"username": "dupeuser", "password": "AnotherPass1"})
 	req2 := httptest.NewRequest(http.MethodPost, "/api/auth/register", body2)
 	w2 := httptest.NewRecorder()
 	h.RegisterHandler(w2, req2)
@@ -720,7 +747,7 @@ func TestLoginHandler_InvalidCredentials_ReturnsUnauthorized(t *testing.T) {
 	h := newAuthHandlers(t)
 
 	// Register first.
-	reg := jsonBody(t, map[string]string{"username": "loginuser", "password": "correctpassword"})
+	reg := jsonBody(t, map[string]string{"username": "loginuser", "password": "CorrectPass1"})
 	h.RegisterHandler(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/auth/register", reg))
 
 	// Login with wrong password.
@@ -757,9 +784,9 @@ func TestProductRouter_DispatchesGetToProductHandler(t *testing.T) {
 }
 
 func TestProductRouter_DispatchesPatchImageToImageHandler(t *testing.T) {
-	h := newHandlers(t)
+	h, _, uid, productID := newHandlersWithUser(t)
 	body := jsonBody(t, map[string]string{"imageUrl": "https://prod-mercadona.imgix.net/img.jpg"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	req := withUserID(httptest.NewRequest(http.MethodPatch, "/api/products/"+productID+"/image", body), uid)
 	w := httptest.NewRecorder()
 	h.ProductRouter(w, req)
 	if w.Code != http.StatusOK {
@@ -789,10 +816,21 @@ func TestProductImageHandler_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+func TestProductImageHandler_Unauthenticated_Returns401(t *testing.T) {
+	h, _, _, productID := newHandlersWithUser(t)
+	body := jsonBody(t, map[string]string{"imageUrl": "https://prod-mercadona.imgix.net/img.jpg"})
+	req := httptest.NewRequest(http.MethodPatch, "/api/products/"+productID+"/image", body)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
 func TestProductImageHandler_MissingImageURL_ReturnsBadRequest(t *testing.T) {
-	h := newHandlers(t)
+	h, _, uid, _ := newHandlersWithUser(t)
 	body := jsonBody(t, map[string]string{"imageUrl": ""})
-	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	req := withUserID(httptest.NewRequest(http.MethodPatch, "/api/products/any/image", body), uid)
 	w := httptest.NewRecorder()
 	h.ProductImageHandler(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -800,10 +838,21 @@ func TestProductImageHandler_MissingImageURL_ReturnsBadRequest(t *testing.T) {
 	}
 }
 
+func TestProductImageHandler_InvalidURLScheme_ReturnsBadRequest(t *testing.T) {
+	h, _, uid, productID := newHandlersWithUser(t)
+	body := jsonBody(t, map[string]string{"imageUrl": "javascript:alert(1)"})
+	req := withUserID(httptest.NewRequest(http.MethodPatch, "/api/products/"+productID+"/image", body), uid)
+	w := httptest.NewRecorder()
+	h.ProductImageHandler(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for javascript: URL, got %d", w.Code)
+	}
+}
+
 func TestProductImageHandler_ProductNotFound_Returns404(t *testing.T) {
-	h := newHandlers(t)
+	h, _, uid, _ := newHandlersWithUser(t)
 	body := jsonBody(t, map[string]string{"imageUrl": "https://prod-mercadona.imgix.net/img.jpg"})
-	req := httptest.NewRequest(http.MethodPatch, "/api/products/9999/image", body)
+	req := withUserID(httptest.NewRequest(http.MethodPatch, "/api/products/nonexistent-product-9999/image", body), uid)
 	w := httptest.NewRecorder()
 	h.ProductImageHandler(w, req)
 	if w.Code != http.StatusNotFound {
@@ -812,10 +861,10 @@ func TestProductImageHandler_ProductNotFound_Returns404(t *testing.T) {
 }
 
 func TestProductImageHandler_ValidRequest_ReturnsOK(t *testing.T) {
-	h := newHandlers(t)
+	h, _, uid, productID := newHandlersWithUser(t)
 	imageURL := "https://prod-mercadona.imgix.net/images/img.jpg"
 	body := jsonBody(t, map[string]string{"imageUrl": imageURL})
-	req := httptest.NewRequest(http.MethodPatch, "/api/products/1/image", body)
+	req := withUserID(httptest.NewRequest(http.MethodPatch, "/api/products/"+productID+"/image", body), uid)
 	w := httptest.NewRecorder()
 	h.ProductImageHandler(w, req)
 	if w.Code != http.StatusOK {
@@ -828,8 +877,8 @@ func TestProductImageHandler_ValidRequest_ReturnsOK(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.ID != "1" {
-		t.Errorf("expected id '1', got %q", resp.ID)
+	if resp.ID != productID {
+		t.Errorf("expected id %q, got %q", productID, resp.ID)
 	}
 	if resp.ImageURL != imageURL {
 		t.Errorf("expected imageUrl %q, got %q", imageURL, resp.ImageURL)
@@ -840,7 +889,7 @@ func TestLoginHandler_Success_ReturnsTokenAndUserID(t *testing.T) {
 	h := newAuthHandlers(t)
 
 	// Register.
-	reg := jsonBody(t, map[string]string{"username": "loginok", "password": "correctpassword"})
+	reg := jsonBody(t, map[string]string{"username": "loginok", "password": "CorrectPass1"})
 	regReq := httptest.NewRequest(http.MethodPost, "/api/auth/register", reg)
 	regW := httptest.NewRecorder()
 	h.RegisterHandler(regW, regReq)
@@ -855,7 +904,7 @@ func TestLoginHandler_Success_ReturnsTokenAndUserID(t *testing.T) {
 	}
 
 	// Login.
-	body := jsonBody(t, map[string]string{"username": "loginok", "password": "correctpassword"})
+	body := jsonBody(t, map[string]string{"username": "loginok", "password": "CorrectPass1"})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", body)
 	w := httptest.NewRecorder()
 	h.LoginHandler(w, req)
@@ -921,7 +970,7 @@ func TestChangePasswordHandler_MethodNotAllowed(t *testing.T) {
 
 func TestChangePasswordHandler_Unauthenticated_ReturnsUnauthorized(t *testing.T) {
 	h := newAuthHandlers(t)
-	body := jsonBody(t, map[string]string{"currentPassword": "old", "newPassword": "newpassword1"})
+	body := jsonBody(t, map[string]string{"currentPassword": "old", "newPassword": "NewPassword1"})
 	req := httptest.NewRequest(http.MethodPatch, "/api/auth/password", body)
 	// No userID in context (unauthenticated).
 	w := httptest.NewRecorder()
@@ -933,8 +982,8 @@ func TestChangePasswordHandler_Unauthenticated_ReturnsUnauthorized(t *testing.T)
 
 func TestChangePasswordHandler_ShortNewPassword_ReturnsBadRequest(t *testing.T) {
 	h := newAuthHandlers(t)
-	uid := registerAndGetID(t, h, "pwduser", "originalpass")
-	body := jsonBody(t, map[string]string{"currentPassword": "originalpass", "newPassword": "short"})
+	uid := registerAndGetID(t, h, "pwduser", "OriginalPass1")
+	body := jsonBody(t, map[string]string{"currentPassword": "OriginalPass1", "newPassword": "short"})
 	req := withUserID(httptest.NewRequest(http.MethodPatch, "/api/auth/password", body), uid)
 	w := httptest.NewRecorder()
 	h.ChangePasswordHandler(w, req)
@@ -945,8 +994,8 @@ func TestChangePasswordHandler_ShortNewPassword_ReturnsBadRequest(t *testing.T) 
 
 func TestChangePasswordHandler_WrongCurrentPassword_ReturnsUnauthorized(t *testing.T) {
 	h := newAuthHandlers(t)
-	uid := registerAndGetID(t, h, "pwduser2", "correctpass1")
-	body := jsonBody(t, map[string]string{"currentPassword": "wrongpass", "newPassword": "newpassword1"})
+	uid := registerAndGetID(t, h, "pwduser2", "CorrectPass1")
+	body := jsonBody(t, map[string]string{"currentPassword": "wrongpass", "newPassword": "NewPassword1"})
 	req := withUserID(httptest.NewRequest(http.MethodPatch, "/api/auth/password", body), uid)
 	w := httptest.NewRecorder()
 	h.ChangePasswordHandler(w, req)
@@ -976,7 +1025,7 @@ func TestHouseholdHandler_GetUnauthenticated_Returns401(t *testing.T) {
 
 func TestHouseholdHandler_GetNoHousehold_ReturnsEmptyMembers(t *testing.T) {
 	h, s := newHouseholdHandlers(t)
-	uid := registerAndGetID(t, h, "alice", "password123")
+	uid := registerAndGetID(t, h, "alice", "Password123")
 	_ = s // ensure store is available if needed
 
 	req := withUserID(httptest.NewRequest(http.MethodGet, "/api/household", nil), uid)
@@ -1018,7 +1067,7 @@ func TestHouseholdInviteHandler_Unauthenticated_Returns401(t *testing.T) {
 
 func TestHouseholdInviteHandler_ReturnsToken(t *testing.T) {
 	h, _ := newHouseholdHandlers(t)
-	uid := registerAndGetID(t, h, "alice", "password123")
+	uid := registerAndGetID(t, h, "alice", "Password123")
 
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/api/household/invite", nil), uid)
 	w := httptest.NewRecorder()
@@ -1039,8 +1088,8 @@ func TestHouseholdInviteHandler_ReturnsToken(t *testing.T) {
 
 func TestHouseholdAcceptHandler_ValidToken_JoinsHousehold(t *testing.T) {
 	h, s := newHouseholdHandlers(t)
-	uid1 := registerAndGetID(t, h, "alice", "password123")
-	uid2 := registerAndGetID(t, h, "bob", "password123")
+	uid1 := registerAndGetID(t, h, "alice", "Password123")
+	uid2 := registerAndGetID(t, h, "bob", "Password123")
 
 	// Alice creates an invitation.
 	invReq := withUserID(httptest.NewRequest(http.MethodPost, "/api/household/invite", nil), uid1)
@@ -1073,7 +1122,7 @@ func TestHouseholdAcceptHandler_ValidToken_JoinsHousehold(t *testing.T) {
 
 func TestHouseholdAcceptHandler_MissingToken_Returns400(t *testing.T) {
 	h, _ := newHouseholdHandlers(t)
-	uid := registerAndGetID(t, h, "alice", "password123")
+	uid := registerAndGetID(t, h, "alice", "Password123")
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/api/household/accept", nil), uid)
 	w := httptest.NewRecorder()
 	h.HouseholdAcceptHandler(w, req)
@@ -1084,7 +1133,7 @@ func TestHouseholdAcceptHandler_MissingToken_Returns400(t *testing.T) {
 
 func TestHouseholdAcceptHandler_InvalidToken_Returns404(t *testing.T) {
 	h, _ := newHouseholdHandlers(t)
-	uid := registerAndGetID(t, h, "alice", "password123")
+	uid := registerAndGetID(t, h, "alice", "Password123")
 	req := withUserID(httptest.NewRequest(http.MethodPost, "/api/household/accept?token=notavalidtoken", nil), uid)
 	w := httptest.NewRecorder()
 	h.HouseholdAcceptHandler(w, req)
@@ -1095,7 +1144,7 @@ func TestHouseholdAcceptHandler_InvalidToken_Returns404(t *testing.T) {
 
 func TestHouseholdAcceptHandler_OwnToken_Returns400(t *testing.T) {
 	h, _ := newHouseholdHandlers(t)
-	uid := registerAndGetID(t, h, "alice", "password123")
+	uid := registerAndGetID(t, h, "alice", "Password123")
 
 	invReq := withUserID(httptest.NewRequest(http.MethodPost, "/api/household/invite", nil), uid)
 	invW := httptest.NewRecorder()
@@ -1116,7 +1165,7 @@ func TestHouseholdAcceptHandler_OwnToken_Returns400(t *testing.T) {
 
 func TestHouseholdHandler_DeleteLeaves(t *testing.T) {
 	h, s := newHouseholdHandlers(t)
-	uid := registerAndGetID(t, h, "alice", "password123")
+	uid := registerAndGetID(t, h, "alice", "Password123")
 
 	// Create a household first via invite.
 	invReq := withUserID(httptest.NewRequest(http.MethodPost, "/api/household/invite", nil), uid)
@@ -1145,10 +1194,10 @@ func TestHouseholdHandler_DeleteLeaves(t *testing.T) {
 
 func TestChangePasswordHandler_Success_AllowsLoginWithNewPassword(t *testing.T) {
 	h := newAuthHandlers(t)
-	uid := registerAndGetID(t, h, "pwduser3", "oldpassword1")
+	uid := registerAndGetID(t, h, "pwduser3", "OldPassword1")
 
 	// Change the password.
-	body := jsonBody(t, map[string]string{"currentPassword": "oldpassword1", "newPassword": "newpassword1"})
+	body := jsonBody(t, map[string]string{"currentPassword": "OldPassword1", "newPassword": "NewPassword1"})
 	req := withUserID(httptest.NewRequest(http.MethodPatch, "/api/auth/password", body), uid)
 	w := httptest.NewRecorder()
 	h.ChangePasswordHandler(w, req)
@@ -1157,7 +1206,7 @@ func TestChangePasswordHandler_Success_AllowsLoginWithNewPassword(t *testing.T) 
 	}
 
 	// Old password must no longer work.
-	oldLogin := jsonBody(t, map[string]string{"username": "pwduser3", "password": "oldpassword1"})
+	oldLogin := jsonBody(t, map[string]string{"username": "pwduser3", "password": "OldPassword1"})
 	wOld := httptest.NewRecorder()
 	h.LoginHandler(wOld, httptest.NewRequest(http.MethodPost, "/api/auth/login", oldLogin))
 	if wOld.Code != http.StatusUnauthorized {
@@ -1165,7 +1214,7 @@ func TestChangePasswordHandler_Success_AllowsLoginWithNewPassword(t *testing.T) 
 	}
 
 	// New password must work.
-	newLogin := jsonBody(t, map[string]string{"username": "pwduser3", "password": "newpassword1"})
+	newLogin := jsonBody(t, map[string]string{"username": "pwduser3", "password": "NewPassword1"})
 	wNew := httptest.NewRecorder()
 	h.LoginHandler(wNew, httptest.NewRequest(http.MethodPost, "/api/auth/login", newLogin))
 	if wNew.Code != http.StatusOK {

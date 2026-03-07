@@ -7,6 +7,7 @@ import LoginModal from './components/LoginModal';
 import ChangePasswordModal from './components/ChangePasswordModal';
 import HouseholdSection from './components/HouseholdSection';
 import AcceptInviteModal from './components/AcceptInviteModal';
+import { logout } from './api/auth';
 import type { ProductBrowserState } from './components/ProductBrowser';
 import type { AuthState } from './types';
 
@@ -174,7 +175,12 @@ export default function App() {
     setShowLoginModal(false);
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    // Revoke the token server-side before clearing local state so that a
+    // stolen token cannot be reused within its remaining TTL.
+    if (auth.token) {
+      await logout(auth.token).catch(() => {});
+    }
     const cleared: AuthState = { user: null, token: null };
     setAuth(cleared);
     saveAuth(cleared);
@@ -199,7 +205,7 @@ export default function App() {
               username={auth.user.username}
               email={auth.user.email}
               token={auth.token ?? ''}
-              onLogout={handleLogout}
+              onLogout={() => { void handleLogout(); }}
               onChangePassword={() => setShowChangePasswordModal(true)}
             />
           ) : (

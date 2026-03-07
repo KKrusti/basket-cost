@@ -162,6 +162,52 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("migrate m8 users.household_id: %w", err)
 	}
 
+	// m9: revoked JWT tokens table for server-side logout support.
+	m9 := `
+		CREATE TABLE IF NOT EXISTS revoked_tokens (
+			jti        TEXT PRIMARY KEY,
+			expires_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at
+			ON revoked_tokens(expires_at);
+	`
+	if _, err := db.Exec(m9); err != nil {
+		return fmt.Errorf("migrate m9: %w", err)
+	}
+
+	// m10: fix processed_files deduplication to be per-user instead of global.
+	// The original schema used filename as the sole PRIMARY KEY, which prevented
+	// two different users from uploading files with the same name. We recreate
+	// the table with a (filename, user_id) unique index using COALESCE so that
+	// NULL user_id (seed data) is still deduplicated correctly.
+	var m10Done int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_processed_files_dedup'`,
+	).Scan(&m10Done); err != nil {
+		return fmt.Errorf("migrate m10 check: %w", err)
+	}
+	if m10Done == 0 {
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("migrate m10 begin: %w", err)
+		}
+		defer tx.Rollback() //nolint:errcheck
+		for _, stmt := range []string{
+			`CREATE TABLE processed_files_v2 (filename TEXT NOT NULL, imported_at TEXT NOT NULL, user_id INTEGER REFERENCES users(id))`,
+			`CREATE UNIQUE INDEX idx_processed_files_dedup ON processed_files_v2(filename, COALESCE(user_id, 0))`,
+			`INSERT OR IGNORE INTO processed_files_v2 SELECT filename, imported_at, user_id FROM processed_files`,
+			`DROP TABLE processed_files`,
+			`ALTER TABLE processed_files_v2 RENAME TO processed_files`,
+		} {
+			if _, err := tx.Exec(stmt); err != nil {
+				return fmt.Errorf("migrate m10: %w", err)
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("migrate m10 commit: %w", err)
+		}
+	}
+
 	return nil
 }
 

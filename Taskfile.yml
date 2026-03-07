@@ -1,5 +1,7 @@
 version: '3'
 
+dotenv: ['.env']
+
 tasks:
   backend:
     desc: Levanta solo el servidor backend (Go) en http://localhost:8080

@@ -78,7 +78,17 @@ export async function changePassword(currentPassword: string, newPassword: strin
   }
 }
 
-export function logout(): void {
-  // Logout is handled client-side by clearing the stored token.
-  // No server endpoint is needed since JWTs are stateless.
+export async function logout(token: string): Promise<void> {
+  const { signal, clear } = withTimeout(TIMEOUT_MS);
+  try {
+    await fetch(`${API_BASE}/auth/logout`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    });
+  } catch {
+    // Ignore network errors — client-side token removal still proceeds.
+  } finally {
+    clear();
+  }
 }

@@ -30,6 +30,9 @@ Thumbs.db
 /backend/server
 /backend/bin/server
 
+# Variables de entorno (nunca subir al repositorio)
+.env
+
 # Playwright
 /frontend/playwright-report/
 /frontend/test-results/

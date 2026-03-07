@@ -138,7 +138,17 @@ describe('changePassword', () => {
 });
 
 describe('logout', () => {
-  it('does not throw any error', () => {
-    expect(() => logout()).not.toThrow();
+  it('calls the logout endpoint and does not throw on success', async () => {
+    mockFetch.mockResolvedValueOnce(makeResponse(200, { ok: true }));
+    await expect(logout('fake-token')).resolves.toBeUndefined();
+    expect(mockFetch).toHaveBeenCalledWith(
+      '/api/auth/logout',
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ Authorization: 'Bearer fake-token' }) }),
+    );
+  });
+
+  it('does not throw on network error', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network error'));
+    await expect(logout('fake-token')).resolves.toBeUndefined();
   });
 });

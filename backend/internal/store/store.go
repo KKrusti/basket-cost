@@ -56,6 +56,15 @@ type Store interface {
 	// for userID. Only products with at least 2 records and a positive increase are included.
 	GetBiggestPriceIncreases(userID int64, limit int) ([]models.PriceIncreaseProduct, error)
 
+	// RevokeToken stores a JWT JTI in the revoked-tokens list so that the
+	// token is rejected even before its natural expiry.
+	RevokeToken(jti string, expiresAt time.Time) error
+	// IsTokenRevoked returns true if the given JTI has been revoked.
+	IsTokenRevoked(jti string) (bool, error)
+	// CleanupExpiredTokens removes revoked-token entries whose expiry has
+	// passed. Safe to call periodically from a background goroutine.
+	CleanupExpiredTokens() error
+
 	// GetHouseholdMembers returns all members of the household userID belongs to.
 	// Returns nil if userID has no household.
 	GetHouseholdMembers(userID int64) ([]models.User, error)
@@ -781,6 +790,44 @@ func (s *SQLiteStore) DeleteHouseholdInvitation(token string) error {
 	_, err := s.db.Exec(`DELETE FROM household_invitations WHERE token = ?`, token)
 	if err != nil {
 		return fmt.Errorf("delete invitation: %w", err)
+	}
+	return nil
+}
+
+// RevokeToken stores the given JTI so that ValidateToken callers can check
+// whether a token has been invalidated (e.g., after logout).
+func (s *SQLiteStore) RevokeToken(jti string, expiresAt time.Time) error {
+	_, err := s.db.Exec(
+		`INSERT OR IGNORE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)`,
+		jti, expiresAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("revoke token %q: %w", jti, err)
+	}
+	return nil
+}
+
+// IsTokenRevoked returns true if the given JTI exists in the revocation table.
+func (s *SQLiteStore) IsTokenRevoked(jti string) (bool, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM revoked_tokens WHERE jti = ?`, jti,
+	).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("check revoked token %q: %w", jti, err)
+	}
+	return count > 0, nil
+}
+
+// CleanupExpiredTokens deletes revocation entries whose expiry has already
+// passed. Intended to be called periodically from a background goroutine.
+func (s *SQLiteStore) CleanupExpiredTokens() error {
+	_, err := s.db.Exec(
+		`DELETE FROM revoked_tokens WHERE expires_at < ?`,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("cleanup expired tokens: %w", err)
 	}
 	return nil
 }
